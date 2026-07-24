@@ -624,13 +624,11 @@ class AgentRun:
         kernel still decides whether anything was established."""
         from . import library
 
+        # No search required first: a certificate stands on its own, and making
+        # the model hunt before it may prove would be the harness dictating the
+        # order of work. A search that already found a counterexample is the
+        # one case this refuses.
         report = self.best_report()
-        if report is None:
-            return json.dumps({
-                "proved": False,
-                "reason": "no search report yet — run hunt (or sample) first, so "
-                          "the kernel knows no counterexample turned up",
-            })
         notes: list[str] = []
         proof = proof_mod.sos_proof(
             self.spec, report, out_dir=self.out,

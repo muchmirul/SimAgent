@@ -28,6 +28,15 @@ MAX_VARS = 8
 MAX_DEGREE = 8
 
 
+def _exact(v) -> sp.Rational:
+    """A rational, exactly. Floats are snapped; exact values pass through
+    untouched (nsimplify on an exact value can return an irrational that is
+    merely close to it, which would leave exact arithmetic silently)."""
+    if isinstance(v, sp.Basic) and v.is_rational:
+        return sp.Rational(v)
+    return sp.Rational(sp.nsimplify(v, rational=True))
+
+
 class SOSError(ValueError):
     """The margin is outside the reach of a sum-of-squares certificate."""
 
@@ -55,7 +64,7 @@ def _psd_squares(G: sp.Matrix) -> list[tuple] | None:
     work = sp.Matrix(G)
     squares: list[tuple] = []
     for i in range(n):
-        d = sp.nsimplify(work[i, i])
+        d = sp.cancel(work[i, i])
         if d < 0:
             return None
         if d == 0:
@@ -63,11 +72,11 @@ def _psd_squares(G: sp.Matrix) -> list[tuple] | None:
             if any(work[i, j] != 0 for j in range(n)):
                 return None
             continue
-        v = [sp.nsimplify(work[i, j] / d) for j in range(n)]
+        v = [sp.cancel(work[i, j] / d) for j in range(n)]
         squares.append((d, v))
         for r in range(n):
             for c in range(n):
-                work[r, c] = sp.nsimplify(work[r, c] - d * v[r] * v[c])
+                work[r, c] = sp.cancel(work[r, c] - d * v[r] * v[c])
     if any(work[r, c] != 0 for r in range(n) for c in range(n)):
         return None  # elimination left a remainder: not PSD
     return squares
@@ -82,15 +91,15 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> 
     `notes`: a dead end with no reason is a dead end the caller cannot act on.
     """
     say = notes.append if notes is not None else (lambda _m: None)
-    target_expr = sp.expand(poly - sp.nsimplify(eps))
+    target_expr = sp.expand(poly - _exact(eps))
     if len(symbols) > MAX_VARS:
         raise SOSError(f"sum-of-squares search caps at {MAX_VARS} variables")
     if not symbols:
-        c = sp.nsimplify(target_expr)
+        c = sp.cancel(target_expr)
         if not c.is_rational:
             raise SOSError("constant margin is not rational")
         return ({"basis": [()], "gram": sp.Matrix([[c]]), "squares": [(c, [sp.Integer(1)])],
-                 "eps": sp.nsimplify(eps), "symbols": [],
+                 "eps": _exact(eps), "symbols": [],
                  "monomials": [()], "coefficients": [c]} if c >= 0 else None)
     try:
         P = sp.Poly(target_expr, *symbols)
@@ -120,7 +129,7 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> 
             m = tuple(a + b for a, b in zip(basis[i], basis[j]))
             produced[m].append(gsym(i, j))
 
-    target = {tuple(mon): sp.nsimplify(c) for mon, c in zip(P.monoms(), P.coeffs())}
+    target = {tuple(mon): sp.cancel(c) for mon, c in zip(P.monoms(), P.coeffs())}
     for m, c in target.items():
         if m not in produced:
             say(f"the margin contains the monomial {m}, which no product of two "
@@ -137,7 +146,8 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> 
     sub = solution[0]
     # the remaining freedom is exactly what a semidefinite solver would search;
     # this pins it at zero, which is why a None here is "not found", not "none exists"
-    values = {s: sp.nsimplify(sub.get(s, 0)).subs({u: 0 for u in unknowns}) for s in unknowns}
+    zeros = {u: 0 for u in unknowns}
+    values = {s: sp.cancel(sp.sympify(sub.get(s, 0)).subs(zeros)) for s in unknowns}
     if any(not v.is_rational for v in values.values()):
         say("the Gram matrix solution is not rational")
         return None
@@ -161,9 +171,28 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> 
     # Lean check can only force what it is given.
     mons = sorted(produced)
     return {"basis": basis, "gram": G, "squares": squares,
-            "eps": sp.nsimplify(eps), "symbols": list(symbols),
+            "eps": _exact(eps), "symbols": list(symbols),
             "monomials": mons,
             "coefficients": [target.get(m, sp.Integer(0)) for m in mons]}
+
+
+def identity_text(cert: dict, margin_label: str = "margin") -> str:
+    """The certificate written as mathematics a human can check by hand.
+
+    This IS the proof. Expanding the right-hand side and comparing is a
+    ten-second check that needs no Lean and no trust in this code, so the
+    kernel must never compute it and keep it to itself.
+    """
+    symbols, basis = cert["symbols"], cert["basis"]
+    z = [sp.prod([s**e for s, e in zip(symbols, mon)]) for mon in basis]
+    parts = []
+    for d, v in cert["squares"]:
+        form = sp.expand(sum(vi * zi for vi, zi in zip(v, z)))
+        parts.append(f"({sp.sstr(d)})*({sp.sstr(form)})**2" if d != 1
+                     else f"({sp.sstr(form)})**2")
+    eps = cert["eps"]
+    lhs = margin_label if eps == 0 else f"{margin_label} - ({sp.sstr(eps)})"
+    return f"{lhs} = " + " + ".join(parts) if parts else f"{lhs} = 0"
 
 
 def _verify(target_expr: sp.Expr, symbols: list, basis: list, squares: list) -> bool:
@@ -184,10 +213,14 @@ def prove_positive(poly: sp.Expr, symbols: list, eps_hint=None,
     p >= 0, which does not settle a strict statement, so it is reported with
     `strict: False` and the caller must not upgrade it.
     """
+    # A search may supply a hint, but the instrument must stand alone: without
+    # one it walks a descending ladder to find its own positive lower bound,
+    # rather than making the caller run a search first.
     candidates = []
     if eps_hint is not None and eps_hint > 0:
-        e = sp.Rational(sp.nsimplify(eps_hint, rational=True))
+        e = _exact(eps_hint)
         candidates = [e, e / 4, e / 64]
+    candidates += [sp.Rational(1, 2**k) for k in range(0, 11)]
     for eps in candidates:
         found = find_sos(poly, symbols, eps=eps)
         if found is not None:

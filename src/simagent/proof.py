@@ -165,8 +165,8 @@ def _attach_sos_lean(proof: Proof, spec: ProblemSpec, cert: dict, out_dir) -> No
 
 
 def sos_proof(
-    spec: ProblemSpec, report: SearchReport, out_dir=None, spec_trusted: bool = False,
-    notes: list | None = None,
+    spec: ProblemSpec, report: SearchReport | None = None, out_dir=None,
+    spec_trusted: bool = False, notes: list | None = None,
 ) -> Proof | None:
     """Prove a universal claim outright with a sum-of-squares certificate.
 
@@ -181,7 +181,11 @@ def sos_proof(
     if getattr(spec, "quantifier", None) != "forall":
         say("a sum-of-squares certificate proves a 'forall' claim; this claim is not one")
         return None
-    if report.verdict != "no_counterexample":
+    # A search is NOT a prerequisite: a certificate stands on its own, and
+    # forcing hunt-then-prove would make the harness dictate the workflow.
+    # A search that already found a counterexample is a real contradiction
+    # and is the one case worth refusing.
+    if report is not None and report.verdict not in ("no_counterexample", "no_witness"):
         say(f"the search verdict is {report.verdict!r}: settle that before trying to prove it")
         return None
     got = _margin_polynomial(spec)
@@ -191,7 +195,7 @@ def sos_proof(
         return None
     poly, symbols = got
     hint = None
-    if report.margin_min is not None and report.margin_min > 0:
+    if report is not None and report.margin_min is not None and report.margin_min > 0:
         hint = sp.Rational(report.margin_min).limit_denominator(64) / 2
     try:
         cert = sos.prove_positive(poly, symbols, eps_hint=hint, notes=notes)
@@ -210,12 +214,15 @@ def sos_proof(
         verified_by="none",
         argument=(
             "The claim's margin is a polynomial, and it was written as a sum of "
-            f"squares with nonnegative rational coefficients after subtracting {eps}: "
-            f"margin - {eps} = sum_i d_i (v_i . z)^2, where z is the vector of "
-            "monomials. Every square is nonnegative at every real point, so the "
-            f"margin is at least {eps} > 0 EVERYWHERE — this is a proof for all "
-            "configurations, not evidence from samples. The identity was expanded "
-            "in exact rational arithmetic and re-checked by the Lean kernel."
+            f"squares with nonnegative rational coefficients after subtracting {eps}. "
+            "Every square is nonnegative at every real point, so the margin is at "
+            f"least {eps} > 0 EVERYWHERE — a proof for all configurations, not "
+            "evidence from samples.\n\n"
+            "    " + sos.identity_text(cert) + "\n\n"
+            "Expand the right-hand side and compare: that check settles the claim "
+            "by hand, without Lean and without trusting this program. The identity "
+            "was also expanded in exact rational arithmetic and re-checked by the "
+            "Lean kernel."
         ),
         statement_review="bundled-trusted" if spec_trusted else "spec-generated-review-needed",
     )

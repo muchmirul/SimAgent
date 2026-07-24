@@ -106,7 +106,11 @@ def _intersect_lines(a, b, c, d) -> np.ndarray:
 # exactly mirroring the numeric layer's indexing so `P[0][1]` means one thing.
 
 def _sym(v):
-    return sp.nsimplify(v) if not isinstance(v, sp.Basic) else v
+    # exact values pass through untouched; see the note in certify.py on
+    # why nsimplify must never be pointed at something already exact
+    if isinstance(v, sp.Basic):
+        return v
+    return sp.Rational(v) if isinstance(v, int) else sp.nsimplify(v, rational=True)
 
 
 def _mat(rows) -> sp.Matrix:

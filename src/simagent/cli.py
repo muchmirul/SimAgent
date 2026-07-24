@@ -27,6 +27,16 @@ def _cmd_list(_args) -> int:
     return 0
 
 
+def _cmd_bench(args) -> int:
+    """One number for the whole harness. Exit non-zero when it slips, so a
+    regression is a failure and not a paragraph someone has to read."""
+    from . import benchmark
+
+    rows = benchmark.run_all(trials=args.trials, seed=args.seed)
+    print(benchmark.format_report(rows))
+    return 0 if all(r.ok for r in rows) else 1
+
+
 def _resolve_spec(args) -> ProblemSpec:
     if args.spec:
         return ProblemSpec.load(args.spec)
@@ -161,6 +171,11 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="list bundled problems").set_defaults(fn=_cmd_list)
+
+    b = sub.add_parser("bench", help="run every known-answer problem; print one pass rate")
+    b.add_argument("--trials", type=int, default=400)
+    b.add_argument("--seed", type=int, default=0)
+    b.set_defaults(fn=_cmd_bench)
 
     s = sub.add_parser("solve", help="run the full pipeline on a conjecture")
     s.add_argument("problem", nargs="?", help="bundled problem id (see `simagent list`)")

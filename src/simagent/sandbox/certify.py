@@ -86,4 +86,8 @@ def exact_barycentric(pts: sp.Matrix, x: sp.Matrix) -> list:
     w = T.LUsolve(x - p0)
     coords = [1 - sum(w)]
     coords.extend(list(w))
-    return [sp.nsimplify(c) for c in coords]
+    # NEVER nsimplify an already-exact value: it searches for a "nicer"
+    # closed form and will happily hand back an irrational surd that is
+    # merely CLOSE to the rational it was given, which silently leaves
+    # exact arithmetic. cancel() keeps it canonical and rational.
+    return [sp.cancel(c) for c in coords]

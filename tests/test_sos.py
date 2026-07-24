@@ -120,6 +120,27 @@ def test_every_failure_mode_tells_the_model_something_actionable():
         assert any(expected in n for n in notes), f"{name}: {notes}"
 
 
+def test_certificate_is_printed_as_checkable_mathematics():
+    """The identity IS the proof. A reader must be able to expand it by hand
+    and settle the claim without Lean and without trusting this code."""
+    cert = sos.find_sos((x - 1) ** 2 + (y - 1) ** 2 + 1, [x, y], eps=sp.Rational(1, 2))
+    text = sos.identity_text(cert, margin_label="m")
+    lhs, rhs = text.split(" = ", 1)
+    assert lhs == "m - (1/2)"
+    # the printed right-hand side really does equal the margin minus eps
+    margin_minus_eps = sp.expand((x - 1) ** 2 + (y - 1) ** 2 + 1 - sp.Rational(1, 2))
+    assert sp.expand(sp.sympify(rhs) - margin_minus_eps) == 0
+
+
+@lean
+def test_the_proof_record_carries_the_identity(tmp_path):
+    out = run_problem(get("positive-quadratic"), tmp_path, trials=300, seed=1,
+                      render_manim=False)
+    assert "=" in out.proof.argument and "**2" in out.proof.argument
+    assert "sum_i d_i" not in out.proof.argument, "the placeholder must be gone"
+    assert "**2" in (tmp_path / "answer.md").read_text()
+
+
 def test_harness_never_picks_the_method_for_the_model():
     """SimAgent is a harness: it supplies capability, perception and facts,
     never the strategy. An instrument reporting its own limits is doing its
@@ -175,15 +196,19 @@ def test_instrument_refuses_when_a_counterexample_is_on_the_table(tmp_path):
     assert run.deductive is None
 
 
-def test_instrument_asks_for_a_search_before_a_proof(tmp_path):
+@lean
+def test_instrument_needs_no_search_first(tmp_path):
+    """Found in the first live session: the model reached for the proof, was
+    told to search first, and burned a turn repeating itself. A certificate
+    stands on its own; the harness must not dictate the order of work."""
     import json
 
     from simagent.agent import AgentRun
 
     run = AgentRun(get("positive-quadratic"), out_dir=tmp_path)
-    out = json.loads(run._t_sum_of_squares())
-    assert out["proved"] is False
-    assert "hunt" in out["reason"]
+    out = json.loads(run._t_sum_of_squares())  # no hunt beforehand
+    assert out["proved"] is True
+    assert out["verified_by"] == "sandbox+lean"
 
 
 def test_sos_proof_refuses_a_claim_it_should_not_touch():
