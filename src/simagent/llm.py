@@ -70,6 +70,7 @@ class ClaimModel(BaseModel):
     constraint: Optional[KindParamsModel] = None
     certify: Optional[KindParamsModel] = None
     lean: Optional[KindParamsModel] = None
+    assume: list[str] = []
     lean_statement: str = ""
     notes: str = ""
 
@@ -117,6 +118,13 @@ that above d = 3 no Lean certificate exists yet (say so in notes).
 
 ## Constraints (optional validity filter)
 {_registry_doc("constraints", CONSTRAINTS)}
+
+## Assumptions (`assume`: expressions the claim takes as >= 0)
+Part of the STATEMENT, not a filter: write "for all positive x" as
+assume ["P[0]"], and a triangle's side condition as
+assume ["P[0] + P[1] - P[2]", ...]. They are the hypotheses a proof may use
+as ingredients, so a conditional claim is provable only if you declare them.
+Same expression language as the `expr` measure.
 
 ## Certifiers (optional; exact rational re-decision — provide when applicable,
 it upgrades numeric findings into mathematical certificates)

@@ -49,6 +49,11 @@ EXPECTED: dict[str, tuple[str, str, str]] = {
         "counterexample", "sandbox+lean",
         "false: the margin is (x-1)^2+(y-1)^2-1, negative on the unit disc at (1,1)",
     ),
+    "conditional-cubic": (
+        "no_counterexample", "sandbox+lean",
+        "true for x >= 0 only (false at x = -2): proved by a certificate that "
+        "uses the hypothesis as an ingredient",
+    ),
     "positive-quadratic": (
         "no_counterexample", "sandbox+lean",
         "true: proved by a sum-of-squares certificate, minimum margin 1/2",

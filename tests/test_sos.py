@@ -6,6 +6,8 @@ The tests that matter most here are the refusals. A proving path that says
 inequalities must fail, non-strict ones must not be upgraded to strict, and
 nothing is stamped unless the Lean kernel accepts the certificate.
 """
+import dataclasses
+
 import numpy as np
 import pytest
 import sympy as sp
@@ -77,9 +79,7 @@ def test_monomial_list_covers_every_product():
 @lean
 def test_certificate_is_kernel_checked():
     found = sos.find_sos((x - 1) ** 2 + (y - 1) ** 2 + 1, [x, y], eps=sp.Rational(1, 2))
-    src = leangen.lean_sos(found["basis"], found["gram"], found["squares"],
-                           found["monomials"], found["coefficients"],
-                           theorem="t_ok", title="ok")
+    src = leangen.lean_sos(found, theorem="t_ok", title="ok")
     result = lean_check.check_source(src)
     assert result["ok"] and result["axiom_clean"]
 
@@ -90,14 +90,13 @@ def test_lean_rejects_a_tampered_certificate(tamper):
     """The certificate has to have teeth: if it cannot fail, it proves nothing."""
     poly = (x - 1) ** 2 + (y - 1) ** 2 + 1  # true minimum is 1
     found = sos.find_sos(poly, [x, y], eps=sp.Rational(1, 2))
-    coeffs, squares = found["coefficients"], found["squares"]
     if tamper == "overclaim":  # pretend the minimum is 5
         P = sp.Poly(sp.expand(poly - 5), x, y).as_dict()
-        coeffs = [sp.nsimplify(P.get(m, 0)) for m in found["monomials"]]
+        found["coefficients"] = [sp.Rational(P.get(m, 0)) for m in found["monomials"]]
     else:  # not a sum of squares any more
-        squares = [(-d, v) for d, v in squares]
-    src = leangen.lean_sos(found["basis"], found["gram"], squares,
-                           found["monomials"], coeffs, theorem="t_bad", title="bad")
+        for b in found["blocks"]:
+            b["squares"] = [(-d, v) for d, v in b["squares"]]
+    src = leangen.lean_sos(found, theorem="t_bad", title="bad")
     assert lean_check.check_source(src)["ok"] is False
 
 
@@ -234,3 +233,66 @@ def test_bundled_true_claim_is_proved_not_merely_unrefuted(tmp_path):
     assert proof.lean_report["axiom_clean"] is True
     answer = (tmp_path / "answer.md").read_text()
     assert "PROVED for every configuration" in answer
+
+
+# -- conditional claims: hypotheses as ingredients -----------------------------
+
+def test_a_hypothesis_turns_a_refusal_into_a_proof():
+    """x^3 + 1 > x is FALSE on the reals (it reads -5 at x = -2) and TRUE on
+    x >= 0. Without the hypothesis the search must refuse; with it, a
+    certificate exists. That gap is the whole point of conditional proving."""
+    margin = x**3 + 1 - x
+    notes = []
+    assert sos.find_sos(margin, [x], notes=notes) is None
+    assert any("odd total degree" in n for n in notes)
+
+    cert = sos.find_sos(margin, [x], constraints=[x])
+    assert cert is not None
+    assert sos._verify_blocks(sp.expand(margin), [x], cert["blocks"])
+    # the hypothesis really is carried in the decomposition
+    assert any(b["g"] is not None for b in cert["blocks"])
+
+
+def test_conditional_identity_reads_as_mathematics():
+    cert = sos.find_sos(x**3 + 1 - x, [x], constraints=[x])
+    text = sos.identity_text(cert, margin_label="m")
+    lhs, rhs = text.split(" = ", 1)
+    assert sp.expand(sp.sympify(rhs) - sp.expand(x**3 + 1 - x)) == 0
+
+
+@lean
+def test_conditional_certificate_is_kernel_checked():
+    cert = sos.find_sos(x**3 + 1 - x, [x], constraints=[x])
+    src = leangen.lean_sos(cert, theorem="t_cond", title="conditional")
+    result = lean_check.check_source(src)
+    assert result["ok"] and result["axiom_clean"]
+
+
+@lean
+def test_bundled_conditional_claim_is_proved(tmp_path):
+    out = run_problem(get("conditional-cubic"), tmp_path, trials=300, seed=4,
+                      render_manim=False)
+    assert out.proof is not None
+    assert out.proof.verified_by == "sandbox+lean"
+    assert "PROVED for every configuration" in (tmp_path / "answer.md").read_text()
+
+
+def test_claim_round_trips_its_assumptions(tmp_path):
+    claim = get("conditional-cubic")
+    assert claim.assume == ["P[0]"]
+    path = tmp_path / "c.json"
+    claim.save(path)
+    from simagent.core.claim import Claim, validate_claim
+    again = Claim.load(path)
+    assert again.assume == claim.assume
+    assert validate_claim(again) == []
+
+
+def test_a_junk_assumption_is_rejected():
+    from simagent.core.claim import validate_claim
+
+    claim = get("conditional-cubic")
+    bad = dataclasses.replace(claim, assume=["__import__('os')"])
+    assert any("assumption rejected" in e for e in validate_claim(bad))
+    unknown = dataclasses.replace(claim, assume=["Z[0]"])
+    assert any("unknown entities" in e for e in validate_claim(unknown))

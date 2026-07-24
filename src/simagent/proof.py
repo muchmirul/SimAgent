@@ -126,11 +126,16 @@ def _margin_polynomial(spec) -> tuple | None:
         return None
     try:
         shapes = {n: tuple(s.shape) for n, s in spaces_for(spec).items()}
-        poly = expr.evaluate(expr.parse(measure["margin"]),
-                             expr.symbol_env(shapes), exact=True)
+        env = expr.symbol_env(shapes)
+        poly = expr.evaluate(expr.parse(measure["margin"]), env, exact=True)
+        # the claim's hypotheses, as polynomials assumed >= 0
+        assumptions = [expr.evaluate(expr.parse(a), env, exact=True)
+                       for a in getattr(spec, "assume", ())]
     except Exception:  # noqa: BLE001 - not a polynomial margin is a normal outcome
         return None
-    return poly, sorted(poly.free_symbols, key=lambda s: s.name)
+    used = set(poly.free_symbols).union(*[a.free_symbols for a in assumptions]) \
+        if assumptions else set(poly.free_symbols)
+    return poly, sorted(used, key=lambda s: s.name), assumptions
 
 
 def _attach_sos_lean(proof: Proof, spec: ProblemSpec, cert: dict, out_dir) -> None:
@@ -145,9 +150,7 @@ def _attach_sos_lean(proof: Proof, spec: ProblemSpec, cert: dict, out_dir) -> No
     theorem = re.sub(r"\W+", "_", f"{spec.id}_sos_certificate").strip("_")
     try:
         source = leangen.lean_sos(
-            cert["basis"], cert["gram"], cert["squares"],
-            cert["monomials"], cert["coefficients"],
-            theorem=theorem,
+            cert, theorem=theorem,
             title=f"Sum-of-squares certificate for: {spec.title}",
         )
     except Exception as e:  # noqa: BLE001
@@ -193,12 +196,13 @@ def sos_proof(
         say("the margin is not a symbolic polynomial in the free variables "
             "(an `expr` measure with no recipe is what this needs)")
         return None
-    poly, symbols = got
+    poly, symbols, assumptions = got
     hint = None
     if report is not None and report.margin_min is not None and report.margin_min > 0:
         hint = sp.Rational(report.margin_min).limit_denominator(64) / 2
     try:
-        cert = sos.prove_positive(poly, symbols, eps_hint=hint, notes=notes)
+        cert = sos.prove_positive(poly, symbols, eps_hint=hint,
+                                  constraints=assumptions, notes=notes)
     except sos.SOSError as e:
         say(str(e))
         return None

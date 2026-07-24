@@ -190,24 +190,28 @@ def lean_expr_sign(
     return "\n".join(lines)
 
 
-SOS_PRELUDE = """\
+SOS_PRELUDE_V2 = """\
 /- SimAgent sum-of-squares certificate — Lean 4 core only, checked by `decide`.
 
    Encoding: (p, q) : Int × Int stands for the rational p/q with q > 0; the
    theorem asserts q > 0 for every number it uses, and qadd/qmul multiply
    denominators, so qeqB/qleB (cross-multiplication) coincide with =/<= on ℚ.
 
-   `basis` lists the exponent vectors of the monomial vector z, so z_i is the
-   monomial x^(basis i). The checks below verify, by pure computation:
-     (1) every d_i >= 0,
-     (2) G = sum_i d_i * v_i * v_i^T,
-     (3) every monomial of p has coefficient equal to the matching sum of
-         G entries, i.e. p = z^T G z,
-     (4) every product z_i * z_j is one of p's listed monomials (nothing
-         escapes the comparison), and (5) that monomial list has no repeats.
-   Together: p = z^T G z = sum_i d_i (v_i . z)^2, a sum of squares with
-   nonnegative coefficients, hence p >= 0 at EVERY real point. That closure
-   step is the whole trusted modeling argument; all arithmetic is kernel-checked. -/
+   The certificate is a list of BLOCKS. Block k carries a monomial vector z_k
+   (as exponent vectors), a Gram matrix G_k, its decomposition G_k = sum_i
+   d_i v_i v_i^T, and a multiplier polynomial g_k (as monomials + coefficients;
+   g_0 = 1). The checks below verify, by pure computation:
+     (1) every d_i >= 0, so each block is a sum of squares,
+     (2) G_k = sum_i d_i v_i v_i^T for every block,
+     (3) every monomial of p has coefficient equal to the matching sum over
+         all blocks, i.e. p = sum_k g_k * (z_k^T G_k z_k),
+     (4) every monomial any block can produce is in p's listed monomials, so
+         nothing escapes the comparison, and (5) that list has no repeats.
+
+   Hence p = sum_k g_k * sum_i d_i (v_i . z_k)^2. Every square is nonnegative,
+   so wherever every g_k >= 0, p >= 0. With no constraints (only g_0 = 1) that
+   is everywhere. That closure step is the whole trusted modeling argument;
+   all arithmetic is kernel-checked. -/
 
 abbrev Q := Int × Int
 
@@ -239,75 +243,102 @@ def outer (d : Q) (v : List Q) : List (List Q) := v.map (fun vi => scaleRow (qmu
 def addMat (A B : List (List Q)) : List (List Q) := List.zipWith (List.zipWith qadd) A B
 def matEqB (A B : List (List Q)) : Bool :=
   (List.zip A B).all (fun p => (List.zip p.1 p.2).all (fun q => qeqB q.1 q.2))
+
+structure Block where
+  basis : List (List Nat)
+  G : List (List Q)
+  gmons : List (List Nat)
+  gcoef : List Q
+  ds : List Q
+  vs : List (List Q)
+
+def zeroMat (n : Nat) : List (List Q) := List.replicate n (List.replicate n qzero)
+
+def recon (b : Block) : List (List Q) :=
+  (List.zip b.ds b.vs).foldl (fun acc p => addMat acc (outer p.1 p.2))
+    (zeroMat b.basis.length)
+
+-- coefficient of monomial m contributed by one block: g_k * (z^T G z)
+def blockCoef (b : Block) (m : List Nat) : Q :=
+  sumQ ((List.zip b.basis b.G).map (fun r =>
+    sumQ ((List.zip b.basis r.2).map (fun p =>
+      sumQ ((List.zip b.gmons b.gcoef).filterMap (fun t =>
+        if expAdd (expAdd r.1 p.1) t.1 = m then some (qmul p.2 t.2) else none))))))
+
+def dimsOk (b : Block) : Bool :=
+  (b.G.length == b.basis.length) && b.G.all (fun r => r.length == b.basis.length)
+  && (b.ds.length == b.vs.length) && b.vs.all (fun v => v.length == b.basis.length)
+  && (b.gmons.length == b.gcoef.length)
+
+def blockOk (b : Block) : Bool :=
+  dimsOk b
+  && b.ds.all (fun d => qposdenB d && qleB qzero d)
+  && b.G.all (fun r => r.all qposdenB) && b.vs.all (fun v => v.all qposdenB)
+  && b.gcoef.all qposdenB
+  && matEqB (recon b) b.G
 """
 
 SOS_BASIS_CAP = 28  # `decide` walks basis^2 products; keep the kernel honest and quick
 
 
-def lean_sos(
-    basis: list[tuple],
-    gram: sp.Matrix,
-    squares: list[tuple],
-    monomials: list[tuple],
-    coefficients: list,
-    theorem: str,
-    title: str,
-) -> str:
-    """Certificate: the margin polynomial is a sum of squares, so it is
-    nonnegative at every real point — a genuine universal proof, not a sample.
+def lean_sos(cert: dict, theorem: str, title: str) -> str:
+    """Certificate: the margin is a sum of squares (times the hypotheses), so
+    it is nonnegative wherever those hypotheses hold — a universal proof, not
+    a sample.
 
-    Inputs come from `sandbox.sos`; this module only renders them.
+    Takes the certificate from `sandbox.sos` whole; this module only renders
+    it, so the Lean text and the sympy check can never describe different
+    decompositions.
     """
-    n = len(basis)
-    if n > SOS_BASIS_CAP:
+    blocks = cert["blocks"]
+    biggest = max(len(b["basis"]) for b in blocks)
+    if biggest > SOS_BASIS_CAP:
         raise ValueError(
             f"sum-of-squares Lean certificate capped at {SOS_BASIS_CAP} basis "
-            f"monomials (got {n}); the sandbox verdict stands"
+            f"monomials (got {biggest}); the sandbox verdict stands"
         )
 
     def nat_list(v) -> str:
         return "[" + ", ".join(str(int(x)) for x in v) + "]"
 
+    def nat_lists(vs) -> str:
+        return "[" + ", ".join(nat_list(v) for v in vs) + "]"
+
     def q_list(v) -> str:
         return "[" + ", ".join(_q(x) for x in v) + "]"
 
-    lines = [SOS_PRELUDE, f"/- {title} -/", ""]
-    lines.append("def basis : List (List Nat) := ["
-                 + ", ".join(nat_list(b) for b in basis) + "]")
-    lines.append("def mons : List (List Nat) := ["
-                 + ", ".join(nat_list(m) for m in monomials) + "]")
-    lines.append("def pcoef : List Q := " + q_list(coefficients))
-    lines.append("def G : List (List Q) := ["
-                 + ", ".join(q_list([gram[i, j] for j in range(n)]) for i in range(n)) + "]")
-    lines.append("def ds : List Q := " + q_list([d for d, _ in squares]))
-    lines.append("def vs : List (List Q) := ["
-                 + ", ".join(q_list(v) for _, v in squares) + "]")
+    def q_lists(vs) -> str:
+        return "[" + ", ".join(q_list(v) for v in vs) + "]"
+
+    rendered = []
+    for b in blocks:
+        n = len(b["basis"])
+        gmons = sorted(b["gterms"])
+        rendered.append(
+            "  { basis := " + nat_lists(b["basis"])
+            + ", G := " + q_lists([[b["gram"][i, j] for j in range(n)] for i in range(n)])
+            + ", gmons := " + nat_lists(gmons)
+            + ", gcoef := " + q_list([b["gterms"][m] for m in gmons])
+            + ", ds := " + q_list([d for d, _ in b["squares"]])
+            + ", vs := " + q_lists([v for _, v in b["squares"]])
+            + " }"
+        )
+
+    lines = [SOS_PRELUDE_V2, f"/- {title} -/", ""]
+    lines.append("def blocks : List Block := [\n" + ",\n".join(rendered) + "]")
+    lines.append("def mons : List (List Nat) := " + nat_lists(cert["monomials"]))
+    lines.append("def pcoef : List Q := " + q_list(cert["coefficients"]))
     lines += [
         "",
-        "def zeroMat : List (List Q) := List.replicate basis.length "
-        "(List.replicate basis.length qzero)",
-        "def recon : List (List Q) :=",
-        "  (List.zip ds vs).foldl (fun acc p => addMat acc (outer p.1 p.2)) zeroMat",
-        "",
-        "-- coefficient of monomial m in z^T G z",
-        "def gramCoef (m : List Nat) : Q :=",
-        "  sumQ ((List.zip basis G).map (fun r =>",
-        "    sumQ ((List.zip basis r.2).filterMap (fun p =>",
-        "      if expAdd r.1 p.1 = m then some p.2 else none))))",
-        "",
-        "def dimsOk : Bool :=",
-        "  (G.length == basis.length) && G.all (fun r => r.length == basis.length)",
-        "  && (ds.length == vs.length) && vs.all (fun v => v.length == basis.length)",
-        "  && (pcoef.length == mons.length)",
+        "def totalCoef (m : List Nat) : Q := sumQ (blocks.map (fun b => blockCoef b m))",
         "",
         "def checkAll : Bool :=",
-        "  dimsOk",
-        "  && ds.all (fun d => qposdenB d && qleB qzero d)",
-        "  && G.all (fun r => r.all qposdenB) && vs.all (fun v => v.all qposdenB)",
+        "  blocks.all blockOk",
         "  && pcoef.all qposdenB",
-        "  && matEqB recon G",
-        "  && (List.zip mons pcoef).all (fun p => qeqB (gramCoef p.1) p.2)",
-        "  && basis.all (fun a => basis.all (fun b => memb (expAdd a b) mons))",
+        "  && (pcoef.length == mons.length)",
+        "  && (List.zip mons pcoef).all (fun p => qeqB (totalCoef p.1) p.2)",
+        "  && blocks.all (fun b => b.basis.all (fun a => b.basis.all (fun c =>",
+        "       b.gmons.all (fun t => memb (expAdd (expAdd a c) t) mons))))",
         "  && noDup mons",
         "",
         f"theorem {theorem} : checkAll = true := by",

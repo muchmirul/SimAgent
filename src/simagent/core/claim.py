@@ -383,6 +383,10 @@ class Claim:
     certify: dict | None = None
     lean: dict | None = None
     scene: dict | None = None
+    # hypotheses: expressions the claim ASSUMES are >= 0. They are part of the
+    # statement ("for all positive x"), which is why a proof may use them as
+    # ingredients, and why the proved claim must repeat them.
+    assume: list[str] = field(default_factory=list)
     lean_statement: str = ""
     notes: str = ""
     # legacy engine (adapter): the wrapped spec
@@ -443,6 +447,7 @@ class Claim:
             "recipe": self.recipe,
             "measure": self.measure, "constraint": self.constraint,
             "certify": self.certify, "lean": self.lean, "scene": self.scene,
+            "assume": list(self.assume),
             "lean_statement": self.lean_statement, "notes": self.notes,
         }
 
@@ -466,6 +471,7 @@ class Claim:
             recipe=list(data.get("recipe") or []),
             measure=data.get("measure"), constraint=data.get("constraint"),
             certify=data.get("certify"), lean=data.get("lean"), scene=data.get("scene"),
+            assume=list(data.get("assume") or []),
             lean_statement=data.get("lean_statement", ""), notes=data.get("notes", ""),
         )
 
@@ -518,6 +524,14 @@ def validate_claim(claim: Claim, samples: int = 8, seed: int = 0) -> list[str]:
             if a not in known:
                 errors.append(f"recipe step {step.get('name')!r}: unknown argument {a!r}")
         known.add(step.get("name"))
+    for src in claim.assume:
+        try:
+            unknown = expr.names(expr.parse(src)) - known
+        except expr.ExprError as e:
+            errors.append(f"assumption rejected: {e}")
+            continue
+        if unknown:
+            errors.append(f"assumption reads unknown entities: {sorted(unknown)}")
     if claim.measure is not None and claim.measure.get("kind") == "expr":
         try:
             tree = expr.parse(claim.measure.get("margin"))

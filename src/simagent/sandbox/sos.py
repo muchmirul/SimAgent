@@ -12,16 +12,25 @@ where z is the vector of monomials. Every square is nonnegative at every
 real point, so p >= eps everywhere, in one line, forever. The identity is
 found and checked in exact rational arithmetic; nothing here is numerical.
 
-The search is deliberately INCOMPLETE and says so: it fixes the free
-parameters of the Gram matrix at zero rather than solving a semidefinite
-program, so a failure means "no certificate found", never "no certificate
-exists". Fail closed, as everywhere else in the kernel.
+With `constraints` the identity becomes p - eps = sigma_0 + sum_k sigma_k g_k,
+so the claim's own hypotheses ("for positive x", "for the sides of a
+triangle") become ingredients of the proof, exactly as a human uses them.
+Without that, a conditional claim cannot be proved at all: x^3 + 1 - x is
+negative somewhere on the reals, and true on x >= 0.
+
+The search is still INCOMPLETE and says so. Free Gram parameters are tried at
+zero first, then by alternating projection between the affine set and the PSD
+cone, then snapped back to rationals; every candidate is re-checked exactly.
+So a failure means "no certificate found", never "no certificate exists".
+Fail closed, as everywhere else in the kernel.
 """
 from __future__ import annotations
 
 import itertools
 from collections import defaultdict
+from fractions import Fraction
 
+import numpy as np
 import sympy as sp
 
 MAX_VARS = 8
@@ -82,13 +91,103 @@ def _psd_squares(G: sp.Matrix) -> list[tuple] | None:
     return squares
 
 
-def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> dict | None:
-    """Exact rational sum-of-squares certificate for `poly - eps`, or None.
+def _candidate_assignments(sub: dict, unknowns: list, free: list, blocks: list):
+    """Values to try for the Gram matrix's free parameters.
 
-    Raises SOSError when the margin is not a polynomial at all (or is past
-    the size caps); returns None when it is polynomial but no certificate was
-    found with this incomplete search. Every failure appends its REASON to
-    `notes`: a dead end with no reason is a dead end the caller cannot act on.
+    Zero first, because it is cheap and often right. Then a numeric search:
+    alternate between the affine set that reproduces the margin's coefficients
+    and the cone of positive-semidefinite matrices, which converges to a point
+    in both, and snap the result to rationals at a few denominators. Rounding
+    can break either property, so every candidate is still re-checked exactly
+    by the caller; this only proposes.
+    """
+    yield {u: 0 for u in free}
+    if not free:
+        return
+    try:
+        numeric = _alternating_projection(sub, unknowns, free, blocks)
+    except Exception:  # noqa: BLE001 - a numeric failure just means no proposal
+        return
+    if numeric is None:
+        return
+    for max_den in (2, 6, 12, 60, 360, 2520):
+        yield {u: sp.Rational(Fraction(float(val)).limit_denominator(max_den))
+               for u, val in zip(free, numeric)}
+
+
+def _alternating_projection(sub: dict, unknowns: list, free: list, blocks: list,
+                            rounds: int = 200):
+    """Numeric search for free-parameter values that make every block PSD."""
+    index = {u: i for i, u in enumerate(unknowns)}
+    # each unknown is affine in the free parameters: value = base + M @ t
+    base = np.array([float(sp.sympify(sub.get(u, u)).subs({f: 0 for f in free}))
+                     for u in unknowns])
+    cols = []
+    for f in free:
+        one = {g: (1 if g is f else 0) for g in free}
+        cols.append(np.array([float(sp.sympify(sub.get(u, u)).subs(one))
+                              for u in unknowns]) - base)
+    M = np.stack(cols, axis=1)
+    pinv = np.linalg.pinv(M)
+
+    def matrices(vec):
+        out = []
+        for b in blocks:
+            n = len(b["basis"])
+            G = np.zeros((n, n))
+            for (i, j), s in b["syms"].items():
+                G[i, j] = G[j, i] = vec[index[s]]
+            out.append(G)
+        return out
+
+    def flatten(mats):
+        vec = base + M @ np.zeros(len(free))
+        vec = vec.copy()
+        for b, G in zip(blocks, mats):
+            for (i, j), s in b["syms"].items():
+                vec[index[s]] = G[i, j]
+        return vec
+
+    t = np.zeros(len(free))
+    for _ in range(rounds):
+        vec = base + M @ t
+        mats = matrices(vec)
+        worst = min((np.linalg.eigvalsh(G).min() for G in mats), default=0.0)
+        if worst >= 0:
+            return t
+        # project each block onto the PSD cone, then back onto the affine set
+        projected = []
+        for G in mats:
+            w, V = np.linalg.eigh(G)
+            projected.append((V * np.clip(w, 0.0, None)) @ V.T)
+        t = pinv @ (flatten(projected) - base)
+    vec = base + M @ t
+    if min((np.linalg.eigvalsh(G).min() for G in matrices(vec)), default=0.0) < -1e-9:
+        return None
+    return t
+
+
+def _poly_terms(g: sp.Expr, symbols: list) -> dict:
+    """Exponent vector -> rational coefficient."""
+    P = sp.Poly(sp.expand(g), *symbols)
+    return {tuple(m): sp.cancel(c) for m, c in zip(P.monoms(), P.coeffs())}
+
+
+def find_sos(poly: sp.Expr, symbols: list, eps=0, constraints=(),
+             notes: list | None = None) -> dict | None:
+    """Exact rational certificate that `poly - eps` is nonnegative, or None.
+
+        poly - eps  =  sigma_0  +  sum_k sigma_k * g_k       (all sigma SOS)
+
+    With no `constraints` this is a plain sum of squares, so the conclusion
+    holds at every real point. With constraints it holds wherever every
+    `g_k >= 0`, which is what lets a CONDITIONAL claim ("for positive x", "for
+    the sides of a triangle") be proved at all: the hypotheses become
+    ingredients of the proof, exactly as a human uses them.
+
+    Raises SOSError when the margin is not a polynomial (or is past the size
+    caps); returns None when no certificate was found by this incomplete
+    search. Every failure appends its REASON to `notes`.
     """
     say = notes.append if notes is not None else (lambda _m: None)
     target_expr = sp.expand(poly - _exact(eps))
@@ -98,9 +197,14 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> 
         c = sp.cancel(target_expr)
         if not c.is_rational:
             raise SOSError("constant margin is not rational")
-        return ({"basis": [()], "gram": sp.Matrix([[c]]), "squares": [(c, [sp.Integer(1)])],
-                 "eps": _exact(eps), "symbols": [],
-                 "monomials": [()], "coefficients": [c]} if c >= 0 else None)
+        if c < 0:
+            return None
+        block = {"basis": [()], "gram": sp.Matrix([[c]]),
+                 "squares": [(c, [sp.Integer(1)])], "g": None,
+                 "gterms": {(): sp.Integer(1)}}
+        return {"blocks": [block], "basis": [()], "gram": block["gram"],
+                "squares": block["squares"], "eps": _exact(eps), "symbols": [],
+                "monomials": [()], "coefficients": [c], "constraints": []}
     try:
         P = sp.Poly(target_expr, *symbols)
     except sp.PolynomialError as e:
@@ -110,70 +214,106 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, notes: list | None = None) -> 
     deg = P.total_degree()
     if deg > MAX_DEGREE:
         raise SOSError(f"sum-of-squares search caps at total degree {MAX_DEGREE}")
-    if deg % 2 == 1:
+    if deg % 2 == 1 and not constraints:
+        # With hypotheses in hand an odd-degree margin is perfectly provable
+        # (x^3 + 1 - x on x >= 0); without them it must go negative somewhere.
         say(f"the margin has odd total degree {deg}, so it takes negative values "
-            "somewhere: no sum-of-squares decomposition can exist")
+            "somewhere: with no assumptions to use, no decomposition can exist")
         return None
 
-    basis = _monomials(len(symbols), deg // 2)
-    n = len(basis)
-    # unknown symmetric Gram matrix, matched coefficient by coefficient
-    g = {(i, j): sp.Symbol(f"g_{i}_{j}") for i in range(n) for j in range(i, n)}
+    nv = len(symbols)
+    # one block per multiplier: sigma_0 times 1, then sigma_k times g_k
+    multipliers = [(None, {(0,) * nv: sp.Integer(1)})]
+    for g in constraints:
+        multipliers.append((g, _poly_terms(g, symbols)))
 
-    def gsym(i, j):
-        return g[(i, j)] if i <= j else g[(j, i)]
+    blocks = []
+    for idx, (g, gterms) in enumerate(multipliers):
+        gdeg = max(sum(m) for m in gterms)
+        half = (deg - gdeg) // 2
+        if half < 0:
+            continue  # this hypothesis is too high-degree to help here
+        basis = _monomials(nv, half)
+        syms = {(i, j): sp.Symbol(f"g{idx}_{i}_{j}")
+                for i in range(len(basis)) for j in range(i, len(basis))}
+        blocks.append({"basis": basis, "syms": syms, "g": g, "gterms": gterms})
 
     produced: dict[tuple, list] = defaultdict(list)
-    for i in range(n):
-        for j in range(n):
-            m = tuple(a + b for a, b in zip(basis[i], basis[j]))
-            produced[m].append(gsym(i, j))
+    for b in blocks:
+        basis, syms = b["basis"], b["syms"]
+        for i in range(len(basis)):
+            for j in range(len(basis)):
+                s = syms[(i, j)] if i <= j else syms[(j, i)]
+                for t, ct in b["gterms"].items():
+                    m = tuple(a + bb + tt for a, bb, tt in zip(basis[i], basis[j], t))
+                    produced[m].append(ct * s)
 
     target = {tuple(mon): sp.cancel(c) for mon, c in zip(P.monoms(), P.coeffs())}
-    for m, c in target.items():
+    for m in target:
         if m not in produced:
-            say(f"the margin contains the monomial {m}, which no product of two "
-                "basis monomials can produce")
+            say(f"the margin contains the monomial {m}, which nothing in the "
+                "decomposition can produce")
             return None
 
     equations = [sp.Eq(sum(terms), target.get(m, 0)) for m, terms in produced.items()]
-    unknowns = sorted(g.values(), key=lambda s: s.name)
+    unknowns = sorted((s for b in blocks for s in b["syms"].values()),
+                      key=lambda s: s.name)
     solution = sp.solve(equations, unknowns, dict=True)
     if not solution:
-        say("no Gram matrix reproduces the margin's coefficients over this "
-            "monomial basis")
+        say("no combination of squares reproduces the margin's coefficients over "
+            "this monomial basis")
         return None
     sub = solution[0]
-    # the remaining freedom is exactly what a semidefinite solver would search;
-    # this pins it at zero, which is why a None here is "not found", not "none exists"
-    zeros = {u: 0 for u in unknowns}
-    values = {s: sp.cancel(sp.sympify(sub.get(s, 0)).subs(zeros)) for s in unknowns}
-    if any(not v.is_rational for v in values.values()):
-        say("the Gram matrix solution is not rational")
-        return None
-
-    G = sp.Matrix(n, n, lambda i, j: values[gsym(i, j)])
-    squares = _psd_squares(G)
-    if squares is None:
+    free = [u for u in unknowns if u not in sub]
+    # Zero is only the first guess. When it is not positive semidefinite the
+    # remaining freedom is searched numerically and the answer snapped back to
+    # rationals, so "not found" stops meaning "we did not look".
+    for assignment in _candidate_assignments(sub, unknowns, free, blocks):
+        values = {s: sp.cancel(sp.sympify(sub.get(s, s)).subs(assignment))
+                  for s in unknowns}
+        if any(not v.is_rational for v in values.values()):
+            continue
+        ok = True
+        for b in blocks:
+            n = len(b["basis"])
+            syms = b["syms"]
+            b["gram"] = sp.Matrix(n, n, lambda i, j: values[syms[(min(i, j), max(i, j))]])
+            b["squares"] = _psd_squares(b["gram"])
+            if b["squares"] is None:
+                ok = False
+                break
+        if ok and _verify_blocks(target_expr, symbols, blocks):
+            break
+    else:
         # Report the limit, name neither a verdict nor a next method: choosing
         # what to try next is the model's job, not the harness's.
-        say("a Gram matrix was found but it is not positive semidefinite once "
-            "its free parameters are pinned at zero. This search is incomplete, "
-            "so a certificate may still exist (a semidefinite search would find "
-            "one). The margin may equally be negative somewhere. This instrument "
-            "cannot tell those two cases apart")
+        say("no positive-semidefinite solution was found. The numeric search "
+            "plus rational rounding is still incomplete, so a certificate may "
+            "exist that this missed. The margin may equally be negative "
+            "somewhere on the domain. This instrument cannot tell those two "
+            "cases apart")
         return None
-    if not _verify(target_expr, symbols, basis, squares):
-        say("the decomposition failed its own exact expansion check")
-        return None
-    # Every monomial the basis can PRODUCE, not just the ones p mentions: a
-    # product like x*y that p lacks still has to be forced to zero, and the
-    # Lean check can only force what it is given.
+    # Every monomial the decomposition can PRODUCE, not just the ones the margin
+    # mentions: a product the margin lacks still has to be forced to zero, and
+    # the Lean check can only force what it is given.
     mons = sorted(produced)
-    return {"basis": basis, "gram": G, "squares": squares,
+    return {"blocks": blocks,
+            # block 0 under the historical names, so unconstrained callers read
+            # the same shape they always did
+            "basis": blocks[0]["basis"], "gram": blocks[0]["gram"],
+            "squares": blocks[0]["squares"],
             "eps": _exact(eps), "symbols": list(symbols),
+            "constraints": list(constraints),
             "monomials": mons,
             "coefficients": [target.get(m, sp.Integer(0)) for m in mons]}
+
+
+def _block_expr(block: dict, symbols: list) -> sp.Expr:
+    z = [sp.prod([s**e for s, e in zip(symbols, mon)]) for mon in block["basis"]]
+    total = 0
+    for d, v in block["squares"]:
+        total += d * sum(vi * zi for vi, zi in zip(v, z)) ** 2
+    return total if block["g"] is None else total * block["g"]
 
 
 def identity_text(cert: dict, margin_label: str = "margin") -> str:
@@ -183,28 +323,34 @@ def identity_text(cert: dict, margin_label: str = "margin") -> str:
     ten-second check that needs no Lean and no trust in this code, so the
     kernel must never compute it and keep it to itself.
     """
-    symbols, basis = cert["symbols"], cert["basis"]
-    z = [sp.prod([s**e for s, e in zip(symbols, mon)]) for mon in basis]
+    symbols = cert["symbols"]
     parts = []
-    for d, v in cert["squares"]:
-        form = sp.expand(sum(vi * zi for vi, zi in zip(v, z)))
-        parts.append(f"({sp.sstr(d)})*({sp.sstr(form)})**2" if d != 1
-                     else f"({sp.sstr(form)})**2")
+    for block in cert["blocks"]:
+        z = [sp.prod([s**e for s, e in zip(symbols, mon)]) for mon in block["basis"]]
+        for d, v in block["squares"]:
+            form = sp.expand(sum(vi * zi for vi, zi in zip(v, z)))
+            term = f"({sp.sstr(form)})**2" if d == 1 else f"({sp.sstr(d)})*({sp.sstr(form)})**2"
+            if block["g"] is not None:
+                term = f"({sp.sstr(block['g'])})*{term}"
+            parts.append(term)
     eps = cert["eps"]
     lhs = margin_label if eps == 0 else f"{margin_label} - ({sp.sstr(eps)})"
-    return f"{lhs} = " + " + ".join(parts) if parts else f"{lhs} = 0"
+    return f"{lhs} = " + (" + ".join(parts) if parts else "0")
 
 
-def _verify(target_expr: sp.Expr, symbols: list, basis: list, squares: list) -> bool:
-    """Independent check: expand the decomposition and compare, exactly."""
-    z = [sp.prod([s**e for s, e in zip(symbols, mon)]) for mon in basis]
-    total = 0
-    for d, v in squares:
-        total += d * sum(vi * zi for vi, zi in zip(v, z)) ** 2
+def _verify_blocks(target_expr: sp.Expr, symbols: list, blocks: list) -> bool:
+    """Independent check: expand the whole decomposition and compare, exactly."""
+    total = sum(_block_expr(b, symbols) for b in blocks)
     return sp.expand(target_expr - total) == 0
 
 
-def prove_positive(poly: sp.Expr, symbols: list, eps_hint=None,
+def _verify(target_expr: sp.Expr, symbols: list, basis: list, squares: list) -> bool:
+    """Single-block form of `_verify_blocks` (unconstrained certificates)."""
+    return _verify_blocks(target_expr, symbols,
+                          [{"basis": basis, "squares": squares, "g": None}])
+
+
+def prove_positive(poly: sp.Expr, symbols: list, eps_hint=None, constraints=(),
                    notes: list | None = None) -> dict | None:
     """Certify p > 0 everywhere (strict) by certifying p - eps as SOS.
 
@@ -222,11 +368,11 @@ def prove_positive(poly: sp.Expr, symbols: list, eps_hint=None,
         candidates = [e, e / 4, e / 64]
     candidates += [sp.Rational(1, 2**k) for k in range(0, 11)]
     for eps in candidates:
-        found = find_sos(poly, symbols, eps=eps)
+        found = find_sos(poly, symbols, eps=eps, constraints=constraints)
         if found is not None:
             found["strict"] = True
             return found
-    found = find_sos(poly, symbols, eps=0, notes=notes)
+    found = find_sos(poly, symbols, eps=0, constraints=constraints, notes=notes)
     if found is not None:
         found["strict"] = False
         if notes is not None:

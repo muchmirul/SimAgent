@@ -11,6 +11,7 @@ from __future__ import annotations
 from ..core.claim import Claim
 from . import (
     circumcenter_4simplex,
+    conditional_cubic,
     circumcenter_tetrahedron,
     circumcenter_triangle,
     euler_polyhedron,
@@ -29,6 +30,7 @@ _MODULES = [
     sum_of_odds,
     sum_of_squares,
     positive_quadratic,
+    conditional_cubic,
 ]
 
 REGISTRY: dict[str, Claim] = {m.CLAIM.id: m.CLAIM for m in _MODULES}
