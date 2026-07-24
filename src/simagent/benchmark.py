@@ -33,9 +33,9 @@ EXPECTED: dict[str, tuple[str, str, str]] = {
         "false in R^4; no Lean above d=3, so the verdict stops at sandbox",
     ),
     "orthocenter-in-triangle": (
-        "counterexample", "sandbox",
-        "false: the orthocenter is inside iff the triangle is acute; the "
-        "margin reads a derived entity, so no Lean atom exists",
+        "counterexample", "sandbox+lean",
+        "false: the orthocentre is inside iff the triangle is acute; the "
+        "certificate pins the construction to its defining equations",
     ),
     "euler-characteristic-hull": (
         "no_counterexample", "none",

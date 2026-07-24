@@ -111,3 +111,61 @@ def test_lean_refuses_a_derived_entity_as_an_atom():
     env = _exact_recipe_env(claim.recipe, {"T": certify_mod.rationalize_array(RIGHT)})
     with pytest.raises(expr.ExprError):
         expr.lean_form(expr.parse("min(W)"), env, free={"T"})
+
+
+# -- Lean stamps for recipe claims --------------------------------------------
+
+lean = pytest.mark.skipif(not __import__("simagent").lean_check.lean_available(),
+                          reason="no Lean toolchain")
+
+
+@lean
+def test_recipe_certificate_pins_the_construction(tmp_path):
+    """A certificate over a derived VALUE proves nothing about how it was
+    built. This one states the equations that define the orthocentre and the
+    barycentric weights, so the kernel checks the construction itself."""
+    from simagent.pipeline import run_problem
+
+    out = run_problem(get("orthocenter-in-triangle"), tmp_path, trials=400,
+                      seed=5, render_manim=False)
+    assert out.proof.verified_by == "sandbox+lean"
+    assert out.proof.lean_report["axiom_clean"] is True
+    source = (tmp_path / "certificate.lean").read_text()
+    # two altitude conditions define H; sum-to-one plus recombination define W
+    assert source.count("qeq") >= 5
+    assert "edgeDet" in source, "the construction must be shown to be unique"
+
+
+@lean
+def test_a_tampered_recipe_certificate_is_rejected():
+    """If the certificate cannot fail, it proves nothing. Move the orthocentre
+    off the altitudes and the kernel must refuse."""
+    from simagent import lean_check
+    from simagent.core.claim import CLAIM_FORMAT  # noqa: F401  (import guard)
+    from simagent.core.claim import _lean_recipe
+
+    claim = get("orthocenter-in-triangle")
+    obtuse = np.array([[-1.0, 0.0], [1.0, 0.0], [0.0, 0.3]])
+    exact = {"T": certify_mod.rationalize_array(obtuse)}
+    params = dict(claim.lean)
+    good = _lean_recipe(exact, claim.recipe, params)
+    assert lean_check.check_source(good)["ok"] is True
+    # shift H by one: it is no longer the orthocentre, so the pins must fail
+    bad = good.replace("def H_0 : Q := ", "def H_0 : Q := qadd ((1 : Int), 1) ", 1)
+    assert lean_check.check_source(bad)["ok"] is False
+
+
+def test_a_constructor_without_pins_refuses_a_certificate():
+    """Fail closed: a construction the kernel cannot verify must not be
+    smuggled in as a bare number."""
+    import dataclasses
+
+    from simagent.core.claim import _lean_recipe
+
+    claim = get("orthocenter-in-triangle")
+    unpinnable = dataclasses.replace(
+        claim, recipe=[{"name": "H", "ctor": "incenter", "args": ["T"]},
+                       {"name": "W", "ctor": "barycentric", "args": ["T", "H"]}])
+    exact = {"T": certify_mod.rationalize_array(RIGHT)}
+    with pytest.raises(ValueError, match="no Lean pinning equations"):
+        _lean_recipe(exact, unpinnable.recipe, dict(claim.lean))

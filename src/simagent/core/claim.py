@@ -217,7 +217,86 @@ def _lean_expr(exact: dict, recipe: list[dict], params: dict) -> str:
     )
 
 
+def _atom_names(prefix: str, value) -> list:
+    """Nested atom names mirroring a nested exact value."""
+    if isinstance(value, (list, tuple)):
+        return [_atom_names(f"{prefix}_{i}", v) for i, v in enumerate(value)]
+    return prefix
+
+
+def _flatten_atoms(names, values, out: dict) -> None:
+    if isinstance(names, list):
+        for n, v in zip(names, values):
+            _flatten_atoms(n, v, out)
+    else:
+        out[names] = values
+
+
+def _lean_recipe(exact: dict, recipe: list[dict], params: dict) -> str:
+    """Certificate for a margin that reads DERIVED entities.
+
+    Every recipe step must supply the equations that define its output from
+    its arguments (leangen.RECIPE_PINS); without them the derived value would
+    enter Lean as a bare number, proving nothing about its construction, so a
+    missing pin raises and the sandbox verdict stands.
+    """
+    env = _exact_recipe_env(recipe, exact)
+    names = {k: _atom_names(k, v) for k, v in env.items()}
+    atoms: dict = {}
+    for k, v in env.items():
+        _flatten_atoms(names[k], v, atoms)
+
+    pins: list[str] = []
+    for step in recipe:
+        pin = leangen.RECIPE_PINS.get(step["ctor"])
+        if pin is None:
+            raise ValueError(
+                f"constructor {step['ctor']!r} has no Lean pinning equations; "
+                "a certificate over its output would check a bare number"
+            )
+        pins.extend(pin(names[step["name"]], *[names[a] for a in step["args"]]))
+
+    of = params["of"]
+    T = names[of]
+    edges = [[f"(qsub {T[i][j]} {T[0][j]})" for j in range(len(T[0]))]
+             for i in range(1, len(T))]
+
+    tree = expr.parse(params["margin"])
+    value = expr.evaluate(tree, env, exact=True)
+    negative = not bool(value > 0)
+    src = params["margin"].replace(" ", "")
+    if src.startswith("min(") and src.endswith(")") and src[4:-1] in env:
+        # "min(W) < 0" is exactly "some W_k < 0", and that HAS a Q-term while
+        # min itself does not. Same statement, encodable.
+        vec = src[4:-1]
+        comps = names[vec]
+        k = min(range(len(comps)), key=lambda i: env[vec][i])
+        conclusion = [f"qlt {comps[k]} {leangen._q(0)}"] if negative else [
+            f"qlt {leangen._q(0)} {c}" for c in comps]
+        return leangen.lean_recipe_witness(
+            atoms, pins, edges, conclusion,
+            theorem=params["theorem"], title=params["title"],
+        )
+    # derived atoms are legitimate HERE: the pins above tie them to the free
+    # variables, which is exactly what expr.lean_form refuses to assume
+    term_atoms, term = expr.lean_form(tree, env)
+    for name, val in term_atoms.items():
+        atoms.setdefault(name, val)
+    zero = leangen._q(0)
+    conclusion = [f"def margin : Q := {leangen._render_q(term)}",
+                  f"qlt margin {zero}" if negative else f"qlt {zero} margin"]
+    return leangen.lean_recipe_witness(
+        atoms, pins, edges, conclusion[1:], theorem=params["theorem"],
+        title=params["title"], extra_defs=[conclusion[0]],
+    )
+
+
 LEANS = {
+    "recipe": {"fn": _lean_recipe, "params": ("margin", "of", "theorem", "title"),
+               "doc": "certificate for a margin over DERIVED entities: pins each "
+                      "construction to its defining equations, so the kernel "
+                      "checks how the numbers were built (`of` names the point "
+                      "set whose nondegeneracy makes the construction unique)"},
     "expr": {"fn": _lean_expr, "params": ("margin", "theorem", "title"),
              "doc": "kernel-checked sign of the margin expression at an exact "
                     "rational point (no dimension cap; rejects division)"},

@@ -399,3 +399,110 @@ def lean_bounded_nat(theorem: str, title: str, defs: str, statement: str) -> str
             "",
         ]
     )
+
+
+# -- recipe certificates: pin a derived entity to its defining equations -------
+#
+# A certificate over a derived VALUE proves nothing about how that value was
+# built, which is why claims with a recipe stopped at "sandbox". The fix is the
+# one the circumcenter certificate already uses, generalized: state the
+# equations that DEFINE the derived entity from its arguments, so the kernel
+# checks the construction rather than trusting it.
+
+def _sum_term(terms: list[str]) -> str:
+    return _fold("qadd", terms) if terms else _q(0)
+
+
+def _dot_term(u: list[str], v: list[str]) -> str:
+    return _sum_term([f"(qmul {a} {b})" for a, b in zip(u, v)])
+
+
+def _diff(u: list[str], v: list[str]) -> list[str]:
+    return [f"(qsub {a} {b})" for a, b in zip(u, v)]
+
+
+def _pin_circumcenter(out: list[str], T: list[list[str]]) -> list[str]:
+    """|c - v_0|^2 = |c - v_i|^2 for every vertex: that IS the circumcenter."""
+    def dist_sq(v: list[str]) -> str:
+        d = _diff(out, v)
+        return _sum_term([f"(qmul {x} {x})" for x in d])
+    return [f"qeq {dist_sq(T[0])} {dist_sq(T[i])}" for i in range(1, len(T))]
+
+
+def _pin_orthocenter(out: list[str], T: list[list[str]]) -> list[str]:
+    """(H - A) . (B - C) = 0 and (H - B) . (A - C) = 0: H is on two altitudes,
+    which is the definition of the orthocentre."""
+    if len(T) != 3:
+        raise ValueError("orthocenter pin expects a triangle")
+    a, b, c = T
+    return [
+        f"qeq {_dot_term(_diff(out, a), _diff(b, c))} {_q(0)}",
+        f"qeq {_dot_term(_diff(out, b), _diff(a, c))} {_q(0)}",
+    ]
+
+
+def _pin_barycentric(out: list[str], T: list[list[str]], x: list[str]) -> list[str]:
+    """Weights summing to one whose affine combination is the point."""
+    d = len(x)
+    eqs = [f"qeq {_sum_term(out)} {_q(1)}"]
+    for j in range(d):
+        combo = _sum_term([f"(qmul {out[i]} {T[i][j]})" for i in range(len(T))])
+        eqs.append(f"qeq {combo} {x[j]}")
+    return eqs
+
+
+def _pin_centroid(out: list[str], T: list[list[str]]) -> list[str]:
+    m = len(T)
+    return [f"qeq {_sum_term([T[i][j] for i in range(m)])} "
+            f"{_fold('qadd', [out[j]] * m)}" for j in range(len(out))]
+
+
+def _pin_midpoint(out: list[str], a: list[str], b: list[str]) -> list[str]:
+    return [f"qeq (qadd {a[j]} {b[j]}) (qadd {out[j]} {out[j]})"
+            for j in range(len(out))]
+
+
+RECIPE_PINS = {
+    "circumcenter": _pin_circumcenter,
+    "orthocenter": _pin_orthocenter,
+    "barycentric": _pin_barycentric,
+    "centroid": _pin_centroid,
+    "midpoint": _pin_midpoint,
+}
+
+
+def lean_recipe_witness(atoms: dict, pins: list[str], nondegenerate: list[list[str]],
+                        conclusion: list[str], theorem: str, title: str,
+                        extra_defs: list[str] | None = None) -> str:
+    """Certificate for a claim whose margin reads DERIVED entities.
+
+    `pins` are the equations defining each derived entity from its arguments,
+    so the kernel verifies the construction instead of taking the harness's
+    word for the numbers. `nondegenerate` is an edge matrix whose determinant
+    must be nonzero, which is what makes the construction unique.
+    """
+    lines = [PRELUDE, f"/- {title}", "",
+             "   Each derived quantity is PINNED by the equations that define it,",
+             "   so the kernel checks the construction and not merely the numbers.",
+             "   The edge determinant is nonzero, so that construction is unique. -/",
+             ""]
+    for name in sorted(atoms):
+        lines.append(f"def {name} : Q := {_q(atoms[name])}")
+    lines += list(extra_defs or [])
+    conjuncts = [f"qposden {name}" for name in sorted(atoms)]
+    conjuncts += pins
+    if nondegenerate:
+        lines.append(f"def edgeDet : Q := {_det(nondegenerate)}")
+        conjuncts.append(f"¬ qeq edgeDet {_q(0)}")
+    lines.append("")
+    conjuncts += conclusion
+    body = " ∧\n    ".join(conjuncts)
+    lines += [
+        f"theorem {theorem} :",
+        f"    {body} := by",
+        "  decide",
+        "",
+        f"#print axioms {theorem}",
+        "",
+    ]
+    return "\n".join(lines)

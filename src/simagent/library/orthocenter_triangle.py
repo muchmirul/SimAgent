@@ -38,6 +38,16 @@ CLAIM = Claim(
     measure={"kind": "expr", "margin": MARGIN},
     constraint={"kind": "min_volume", "of": "T", "threshold": 0.05},
     certify={"kind": "expr", "margin": MARGIN},
+    lean={
+        "kind": "recipe",
+        "margin": MARGIN,
+        "of": "T",
+        "theorem": "orthocenter_in_triangle_disproof_witness",
+        "title": (
+            "Witness triangle whose orthocentre lies outside it "
+            "(disproves: the orthocentre lies inside every triangle)"
+        ),
+    },
     scene={"kind": "simplex", "of": "T", "center": "H", "weights": "W",
            "circle": False},
     lean_statement=(
