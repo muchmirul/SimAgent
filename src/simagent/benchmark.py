@@ -59,6 +59,12 @@ EXPECTED: dict[str, tuple[str, str, str]] = {
         "true for x >= 0 only (false at x = -2): proved by a certificate that "
         "uses the hypothesis as an ingredient",
     ),
+    "unbounded-quadratic": (
+        "no_counterexample", "sandbox+lean",
+        "true for every n >= 0 (unbounded, so exhaustion cannot reach it); the "
+        "margin is globally positive so a direct certificate settles it, and "
+        "induction settles it independently",
+    ),
     "positive-quadratic": (
         "no_counterexample", "sandbox+lean",
         "true: proved by a sum-of-squares certificate, minimum margin 1/2",

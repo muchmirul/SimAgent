@@ -20,6 +20,7 @@ from . import (
     positive_quadratic,
     sum_of_odds,
     sum_of_squares,
+    unbounded_quadratic,
 )
 
 _MODULES = [
@@ -33,6 +34,7 @@ _MODULES = [
     positive_quadratic,
     conditional_cubic,
     graph_triangle,
+    unbounded_quadratic,
 ]
 
 REGISTRY: dict[str, Claim] = {m.CLAIM.id: m.CLAIM for m in _MODULES}

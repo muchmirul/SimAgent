@@ -241,6 +241,165 @@ def sos_proof(
     return proof
 
 
+def cases_proof(
+    spec: ProblemSpec, var: str, index: int, at, out_dir=None,
+    spec_trusted: bool = False, notes: list | None = None,
+) -> Proof | None:
+    """Prove a claim by splitting its domain in two and certifying each half.
+
+    The MODEL chooses where to split; the harness only executes the split and
+    checks both halves. Splitting one coordinate at a value covers the whole
+    domain (x_i <= at and x_i >= at overlap at the cut), so both certificates
+    together settle the claim.
+    """
+    from .sandbox import leangen, sos
+
+    say = notes.append if notes is not None else (lambda _m: None)
+    got = _margin_polynomial(spec)
+    if got is None:
+        say("the margin is not a symbolic polynomial in the free variables")
+        return None
+    poly, symbols, assumptions = got
+    name = f"{var}_{index}" if index is not None else var
+    target = next((s_ for s_ in symbols if s_.name == name), None)
+    if target is None:
+        say(f"no free coordinate named {name!r} to split on; "
+            f"the margin uses {[s_.name for s_ in symbols]}")
+        return None
+    cut = sp.Rational(sp.nsimplify(at, rational=True))
+    halves = [(f"{name} >= {cut}", target - cut), (f"{name} <= {cut}", cut - target)]
+
+    certs, hint = [], None
+    for label, extra in halves:
+        cert = sos.prove_positive(poly, symbols, eps_hint=hint,
+                                  constraints=assumptions + [extra], notes=notes)
+        if cert is None:
+            say(f"no certificate for the half where {label}")
+            return None
+        if not cert["strict"]:
+            say(f"the half where {label} is not STRICTLY positive (it touches "
+                "equality), so a strict claim is not settled there")
+            return None
+        certs.append(cert)
+
+    eps = min(c["eps"] for c in certs)
+    proof = Proof(
+        method=Method.CASES,
+        claim=spec.latex,
+        verified_by="none",
+        argument=(
+            f"The domain was split at {name} = {cut} into two cases that cover "
+            "it, and each was certified separately: the margin is a sum of "
+            "squares plus the case hypothesis times sums of squares, so it is "
+            f"at least {eps} > 0 on each half, hence everywhere.\n\n"
+            + "\n\n".join(
+                f"    [{label}]  " + sos.identity_text(cert)
+                for (label, _), cert in zip(halves, certs))
+        ),
+        statement_review="bundled-trusted" if spec_trusted else "spec-generated-review-needed",
+    )
+    theorem = re.sub(r"\W+", "_", f"{spec.id}_cases").strip("_")
+    try:
+        source = leangen.lean_sos_cases(
+            certs, theorem=theorem,
+            title=f"Proof by cases for: {spec.title}",
+            case_notes=[label for label, _ in halves],
+        )
+    except Exception as e:  # noqa: BLE001
+        proof.lean_report = {"available": None, "ok": False,
+                             "error": f"{type(e).__name__}: {e}"}
+        return None
+    if out_dir is not None:
+        path = Path(out_dir) / "certificate.lean"
+        path.write_text(source)
+        proof.lean_file = str(path)
+    result = lean_check.check_source(source, workdir=out_dir)
+    proof.lean_report = result
+    if not (result["ok"] and result["axiom_clean"]):
+        say("the Lean kernel did not accept both cases: "
+            + str(result.get("output", ""))[:200])
+        return None  # cases is deductive: Lean or nothing
+    proof.verified_by = "sandbox+lean"
+    say(f"both cases accepted by the Lean kernel: margin >= {eps} everywhere")
+    return proof
+
+
+def induction_proof(
+    spec: ProblemSpec, out_dir=None, spec_trusted: bool = False,
+    notes: list | None = None,
+) -> Proof | None:
+    """Prove an UNBOUNDED claim over the naturals by monotone induction.
+
+    Base case: the margin is positive at the start. Step: the margin never
+    decreases, certified for every n >= 0 at once by a sum-of-squares
+    argument on margin(n+1) - margin(n). Together those give margin(n) >=
+    margin(0) > 0 for every n, which no amount of enumeration could reach.
+    """
+    from .sandbox import leangen, sos
+
+    say = notes.append if notes is not None else (lambda _m: None)
+    got = _margin_polynomial(spec)
+    if got is None:
+        say("the margin is not a symbolic polynomial in the free variables")
+        return None
+    poly, symbols, assumptions = got
+    if len(symbols) != 1:
+        say(f"induction here needs exactly one variable to induct on; the margin "
+            f"uses {[s_.name for s_ in symbols]}")
+        return None
+    n = symbols[0]
+    base = sp.cancel(poly.subs({n: 0}))
+    if not base.is_rational or base <= 0:
+        say(f"the base case fails: the margin at {n.name} = 0 is {base}, "
+            "which is not positive")
+        return None
+    step = sp.expand(poly.subs({n: n + 1}) - poly)
+    cert = sos.find_sos(step, [n], constraints=assumptions + [n], notes=notes)
+    if cert is None:
+        say("the step case is not certifiable: the margin was not shown to be "
+            f"non-decreasing in {n.name}")
+        return None
+
+    proof = Proof(
+        method=Method.INDUCTION,
+        claim=spec.latex,
+        verified_by="none",
+        argument=(
+            f"Base case: the margin at {n.name} = 0 is {base} > 0. Step: the "
+            f"increase margin({n.name}+1) - margin({n.name}) is a sum of squares "
+            f"(using {n.name} >= 0), so the margin never decreases. By induction "
+            f"it is at least {base} > 0 for every {n.name} >= 0 — an UNBOUNDED "
+            "statement, which enumeration could never reach.\n\n"
+            "    step increase: " + sos.identity_text(cert, margin_label="increase")
+        ),
+        statement_review="bundled-trusted" if spec_trusted else "spec-generated-review-needed",
+    )
+    theorem = re.sub(r"\W+", "_", f"{spec.id}_induction_step").strip("_")
+    try:
+        source = leangen.lean_sos(
+            cert, theorem=theorem,
+            title=(f"Induction step for: {spec.title} — the increase "
+                   f"margin(n+1) - margin(n) is a sum of squares for n >= 0 "
+                   f"(base case margin(0) = {base} > 0)"),
+        )
+    except Exception as e:  # noqa: BLE001
+        proof.lean_report = {"available": None, "ok": False,
+                             "error": f"{type(e).__name__}: {e}"}
+        return None
+    if out_dir is not None:
+        path = Path(out_dir) / "certificate.lean"
+        path.write_text(source)
+        proof.lean_file = str(path)
+    result = lean_check.check_source(source, workdir=out_dir)
+    proof.lean_report = result
+    if not (result["ok"] and result["axiom_clean"]):
+        say("the Lean kernel did not accept the induction step")
+        return None  # induction is deductive: Lean or nothing
+    proof.verified_by = "sandbox+lean"
+    say(f"induction step accepted by the Lean kernel; base case {base} > 0")
+    return proof
+
+
 def mechanized_proof(
     spec: ProblemSpec, report: SearchReport, out_dir=None, spec_trusted: bool = False
 ) -> Proof | None:

@@ -20,7 +20,7 @@ from simagent.spec import ProblemSpec
 
 def test_bundled_library_is_exec_free_native_claims():
     claims = all_specs()
-    assert len(claims) == 10
+    assert len(claims) == 11
     for c in claims:
         assert isinstance(c, Claim) and c.is_native, c.id
         assert validate_claim(c) == [], c.id
@@ -32,6 +32,7 @@ def test_bundled_library_is_exec_free_native_claims():
         "sum-of-odds-square", "sum-of-squares-vs-linear",
         "orthocenter-in-triangle", "positive-quadratic",
         "conditional-cubic", "graph-triangle-threshold",
+        "unbounded-quadratic",
     }
 
 

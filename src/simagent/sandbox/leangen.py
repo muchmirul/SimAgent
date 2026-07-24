@@ -281,7 +281,8 @@ def blockOk (b : Block) : Bool :=
 SOS_BASIS_CAP = 28  # `decide` walks basis^2 products; keep the kernel honest and quick
 
 
-def lean_sos(cert: dict, theorem: str, title: str) -> str:
+def lean_sos(cert: dict, theorem: str, title: str,
+             prelude: bool = True, namespace: str | None = None) -> str:
     """Certificate: the margin is a sum of squares (times the hypotheses), so
     it is nonnegative wherever those hypotheses hold — a universal proof, not
     a sample.
@@ -324,7 +325,11 @@ def lean_sos(cert: dict, theorem: str, title: str) -> str:
             + " }"
         )
 
-    lines = [SOS_PRELUDE_V2, f"/- {title} -/", ""]
+    lines = [SOS_PRELUDE_V2] if prelude else []
+    lines += [f"/- {title} -/", ""]
+    if namespace:
+        lines.append(f"namespace {namespace}")
+        lines.append("")
     lines.append("def blocks : List Block := [\n" + ",\n".join(rendered) + "]")
     lines.append("def mons : List (List Nat) := " + nat_lists(cert["monomials"]))
     lines.append("def pcoef : List Q := " + q_list(cert["coefficients"]))
@@ -344,10 +349,30 @@ def lean_sos(cert: dict, theorem: str, title: str) -> str:
         f"theorem {theorem} : checkAll = true := by",
         "  decide",
         "",
-        f"#print axioms {theorem}",
-        "",
     ]
+    if namespace:
+        lines += [f"end {namespace}", "", f"#print axioms {namespace}.{theorem}", ""]
+    else:
+        lines += [f"#print axioms {theorem}", ""]
     return "\n".join(lines)
+
+
+def lean_sos_cases(certs: list[dict], theorem: str, title: str,
+                   case_notes: list[str]) -> str:
+    """One file, one certificate per case, every theorem kernel-checked.
+
+    That the cases COVER the domain is the modeling step and is stated here
+    in prose, exactly like the positive-denominator argument above; the
+    arithmetic of each case is checked."""
+    header = [SOS_PRELUDE_V2, f"/- {title}", ""]
+    header += [f"   case {i}: {note}" for i, note in enumerate(case_notes)]
+    header += ["", "   The cases above cover the claim's domain; each is certified"
+                   " separately below. -/", ""]
+    parts = ["\n".join(header)]
+    for i, cert in enumerate(certs):
+        parts.append(lean_sos(cert, theorem=theorem, title=f"case {i}: {case_notes[i]}",
+                              prelude=False, namespace=f"case{i}"))
+    return "\n".join(parts)
 
 
 def lean_bounded_nat(theorem: str, title: str, defs: str, statement: str) -> str:

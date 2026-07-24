@@ -79,12 +79,22 @@ def run_problem(
     )
     sos_note = None
     if proof is None:
-        # search found nothing to refute; try to PROVE the claim outright
+        # Search found nothing to refute, so try to PROVE the claim outright.
+        # `solve` is the batch path with no model in the loop, so the harness
+        # runs the deductive instruments itself here; in agent mode the model
+        # chooses which one to reach for.
         proof = proof_mod.sos_proof(
             spec, report, out_dir=out, spec_trusted=library.is_bundled(spec)
         )
         if proof is not None:
             sos_note = "no counterexample exists: sum-of-squares certificate found"
+        else:
+            proof = proof_mod.induction_proof(
+                spec, out_dir=out, spec_trusted=library.is_bundled(spec)
+            )
+            if proof is not None:
+                sos_note = ("no counterexample exists: proved by induction "
+                            "(base case + non-decreasing step)")
     log.append(f"verdict: {answer_mod.verdict_text(report, proof)}")
     if sos_note:
         log.append(sos_note)

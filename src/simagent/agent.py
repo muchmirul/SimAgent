@@ -39,14 +39,16 @@ counterexample, exhaustion, combinatorial, infinite descent). That list is
 your option menu — pick a line of attack and pursue it in the scene. The
 choice is YOURS; the harness only hands you instruments.
 
-Four of those methods have an instrument here, and each is a different
+Six of those methods have an instrument here, and each is a different
 question: `hunt` looks for a counterexample (one bad configuration settles a
 `forall` against you), `construct` + `certify` builds a witness for an
-existence claim, `exhaust` checks every case of a finite domain, and
+existence claim, `exhaust` checks every case of a finite domain,
 `sum_of_squares` proves an inequality outright by making the margin a sum of
-squares — the only way to establish a `forall` over a CONTINUOUS domain,
-since no number of good samples ever proves one. For the other six methods,
-reason in the scene and finish with `submit_lean_proof`.
+squares (the only way to establish a `forall` over a CONTINUOUS domain, since
+no number of good samples ever proves one), `prove_by_cases` splits the
+domain where YOU choose and certifies each half, and `prove_by_induction`
+settles every n at once by a base case plus a non-decreasing step. For the
+other four methods, reason in the scene and finish with `submit_lean_proof`.
 
 Think in the scene, not in prose: form each hypothesis as a configuration you
 can look at, then act on it. Every act is traced — thought, move, resulting
@@ -217,6 +219,34 @@ TOOLS = [
             "decided the claim is true and the margin is polynomial. It is recorded "
             "only if the Lean kernel accepts the certificate. On failure you get the "
             "reason, so you can choose a different method."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "prove_by_cases",
+        "description": (
+            "Instrument for a proof by CASES: split the domain in two at a value you "
+            "choose, and certify each half separately. Use it when a claim is true but "
+            "resists a single certificate. YOU pick where to cut; the harness only "
+            "executes the split and checks both halves in Lean."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "var": {"type": "string"},
+                "index": {"type": "integer"},
+                "at": {"type": "number"},
+            },
+            "required": ["var", "at"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "prove_by_induction",
+        "description": (
+            "Instrument for a proof by INDUCTION over one integer variable: checks the "
+            "base case and certifies that the margin never decreases, which settles "
+            "EVERY n at once rather than the bounded range `exhaust` can reach."
         ),
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
@@ -637,6 +667,44 @@ class AgentRun:
         if proof is not None:
             self._keep_best_deductive(proof)
         self._step_extra = {"method": "direct",
+                            "verified_by": proof.verified_by if proof else "none"}
+        return json.dumps({
+            "proved": proof is not None,
+            "verified_by": proof.verified_by if proof else "none",
+            "argument": proof.argument if proof else None,
+            "notes": notes,
+        }, default=str)[:MAX_TOOL_CHARS]
+
+    def _t_prove_by_cases(self, var: str, at: float, index: int = 0):
+        from . import library
+
+        notes: list[str] = []
+        proof = proof_mod.cases_proof(
+            self.spec, var, index, at, out_dir=self.out,
+            spec_trusted=library.is_bundled(self.spec), notes=notes,
+        )
+        if proof is not None:
+            self._keep_best_deductive(proof)
+        self._step_extra = {"method": "cases",
+                            "verified_by": proof.verified_by if proof else "none"}
+        return json.dumps({
+            "proved": proof is not None,
+            "verified_by": proof.verified_by if proof else "none",
+            "argument": proof.argument if proof else None,
+            "notes": notes,
+        }, default=str)[:MAX_TOOL_CHARS]
+
+    def _t_prove_by_induction(self):
+        from . import library
+
+        notes: list[str] = []
+        proof = proof_mod.induction_proof(
+            self.spec, out_dir=self.out,
+            spec_trusted=library.is_bundled(self.spec), notes=notes,
+        )
+        if proof is not None:
+            self._keep_best_deductive(proof)
+        self._step_extra = {"method": "induction",
                             "verified_by": proof.verified_by if proof else "none"}
         return json.dumps({
             "proved": proof is not None,

@@ -74,6 +74,15 @@ const TOOL_SCHEMAS: Record<string, TSchema> = {
   exhaust: Empty(),
   certify: Empty(),
   sum_of_squares: Empty(),
+  prove_by_cases: Type.Object(
+    {
+      var: Type.String(),
+      index: Type.Optional(Type.Integer()),
+      at: Type.Number(),
+    },
+    { additionalProperties: false },
+  ),
+  prove_by_induction: Empty(),
   submit_lean_proof: Type.Object(
     {
       method: StringEnum(METHODS),
