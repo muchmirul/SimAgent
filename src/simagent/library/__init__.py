@@ -15,6 +15,7 @@ from . import (
     circumcenter_tetrahedron,
     circumcenter_triangle,
     euler_polyhedron,
+    graph_triangle,
     orthocenter_triangle,
     positive_quadratic,
     sum_of_odds,
@@ -31,6 +32,7 @@ _MODULES = [
     sum_of_squares,
     positive_quadratic,
     conditional_cubic,
+    graph_triangle,
 ]
 
 REGISTRY: dict[str, Claim] = {m.CLAIM.id: m.CLAIM for m in _MODULES}

@@ -44,9 +44,15 @@ def test_geometry_constructors_hit_known_values():
     ) == pytest.approx([1.0, 1.0])
 
 
-@pytest.mark.parametrize("name", sorted(CONSTRUCTORS))
+GRAPH_CTORS = {"degrees", "edge_count", "triangle_count"}
+
+
+@pytest.mark.parametrize("name", sorted(set(CONSTRUCTORS) - GRAPH_CTORS))
 def test_exact_counterpart_agrees_with_the_numeric_one(name):
-    """Rational inputs, so the two paths must agree to the last bit."""
+    """Rational inputs, so the two paths must agree to the last bit.
+
+    Graph constructors take an adjacency matrix rather than a point set, so
+    they are checked against known graphs in test_graph_space.py instead."""
     entry = CONSTRUCTORS[name]
     P, Q = np.array([1.0, 2.0]), np.array([3.0, -1.0])
     args = {

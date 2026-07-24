@@ -27,7 +27,7 @@ from ..sandbox import geometry, leangen, scene
 from ..sandbox import certify as certify_mod
 from . import expr
 from .derive import CONSTRUCTORS
-from .space import Box, IntBox, Space, spaces_for
+from .space import Box, GraphSpace, IntBox, Space, spaces_for
 
 CLAIM_FORMAT = "claim/1"
 
@@ -126,7 +126,24 @@ def _constraint_hull_valid(vars: dict, params: dict) -> bool:
         return False
 
 
+def _constraint_expr_nonneg(vars: dict, params: dict) -> bool:
+    """The general validity filter: sample only where an expression is >= 0.
+
+    This is how an IMPLICATION is stated ("every graph with at least 5 edges
+    has a triangle"): the hypothesis filters the domain, the measure carries
+    the conclusion."""
+    env = _recipe_env(params.get("_recipe") or [], vars)
+    try:
+        return bool(expr.evaluate(expr.parse(params["expr"]), env) >= 0)
+    except expr.ExprError:
+        return False
+
+
 CONSTRAINTS = {
+    "expr_nonneg": {"fn": _constraint_expr_nonneg, "params": ("expr",),
+                    "doc": "valid only where a rational expression is >= 0; the "
+                           "general way to state a hypothesis that filters the "
+                           "domain (an implication's antecedent)"},
     "min_volume": {"fn": _constraint_min_volume, "params": ("of", "threshold"),
                    "doc": "simplex volume above a nondegeneracy threshold"},
     "hull_valid": {"fn": _constraint_hull_valid, "params": ("of",),
@@ -293,6 +310,25 @@ def _scene_gnomon(env: dict, params: dict) -> list[dict]:
     return prims
 
 
+def _scene_graph(env: dict, params: dict) -> list[dict]:
+    """Vertices on a circle, edges as segments. A graph is the one discrete
+    object that draws itself, which is why graph theory suits this harness."""
+    A = np.asarray(env[params["of"]], dtype=float)
+    n = A.shape[0]
+    ang = 2.0 * np.pi * np.arange(n) / max(n, 1)
+    P = np.stack([np.cos(ang), np.sin(ang), np.zeros(n)], axis=1)
+    edges = [(P[i], P[j]) for i in range(n) for j in range(i + 1, n) if A[i, j] > 0]
+    prims = []
+    if edges:
+        prims.append(scene.segments(edges, color="#4a90d9", width=2.5))
+    prims.append(scene.points(P, color="#ffffff", radius=0.06, name=params["of"]))
+    deg = A.sum(axis=1).astype(int)
+    prims.append(scene.label(
+        "%d vertices, %d edges, degrees %s"
+        % (n, int(A.sum() // 2), deg.tolist())))
+    return prims
+
+
 def _scene_point(env: dict, params: dict) -> list[dict]:
     """The configuration itself, plotted. Generic partner to the `expr`
     measure: the shape of an algebraic claim lives in the field view, so this
@@ -313,6 +349,8 @@ def _scene_point(env: dict, params: dict) -> list[dict]:
 
 
 SCENES = {
+    "graph": {"fn": _scene_graph, "params": ("of",),
+              "doc": "draw a graph: vertices on a circle, edges as segments"},
     "point": {"fn": _scene_point, "params": ("of",),
               "doc": "plot a free entity as a point (or points) in space; the "
                      "general scene for algebraic claims"},
@@ -347,8 +385,10 @@ class NativeEngine:
         if self.claim.constraint is None:
             return True
         c = CONSTRAINTS[self.claim.constraint["kind"]]
+        params = dict(self.claim.constraint)
+        params.setdefault("_recipe", self.claim.recipe)
         return bool(c["fn"]({k: np.asarray(v, dtype=float) for k, v in vars.items()},
-                            self.claim.constraint))
+                            params))
 
     def build_scene(self, **vars) -> list[dict]:
         env = _recipe_env(self.claim.recipe, vars)
@@ -418,7 +458,11 @@ class Claim:
             return self._spec.domain
         out = []
         for name, space in self.spaces.items():
-            kind = "int" if isinstance(space, IntBox) else "real"
+            kind = "real"
+            if isinstance(space, GraphSpace):
+                kind = "graph"
+            elif isinstance(space, IntBox):
+                kind = "int"
             out.append(FreeVar(name=name, shape=list(space.shape),
                                low=float(space.low), high=float(space.high), kind=kind))
         return out
@@ -441,7 +485,8 @@ class Claim:
             "latex": self.latex, "quantifier": self.quantifier,
             "spaces": [
                 {"name": n, "shape": list(s.shape), "low": s.low, "high": s.high,
-                 "kind": "int" if isinstance(s, IntBox) else "real"}
+                 "kind": ("graph" if isinstance(s, GraphSpace)
+                          else "int" if isinstance(s, IntBox) else "real")}
                 for n, s in self.spaces.items()
             ],
             "recipe": self.recipe,
@@ -461,7 +506,9 @@ class Claim:
         spaces: dict[str, Space] = {}
         for s in data["spaces"]:
             shape = tuple(s["shape"])
-            if s.get("kind") == "int":
+            if s.get("kind") == "graph":
+                spaces[s["name"]] = GraphSpace(n=int(shape[0]))
+            elif s.get("kind") == "int":
                 spaces[s["name"]] = IntBox(shape=shape, low=int(s["low"]), high=int(s["high"]))
             else:
                 spaces[s["name"]] = Box(shape=shape, low=float(s["low"]), high=float(s["high"]))

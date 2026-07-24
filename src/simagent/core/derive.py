@@ -39,6 +39,36 @@ def _row(pts: np.ndarray, index: float) -> np.ndarray:
 # and what a measure can talk about qualitatively. Each one is paired with an
 # exact counterpart below so a recipe replays in rational arithmetic.
 
+def _degrees(A: np.ndarray) -> np.ndarray:
+    """Degree of each vertex of a graph given by its adjacency matrix."""
+    return np.asarray(A, dtype=float).sum(axis=1)
+
+
+def _edge_count(A: np.ndarray) -> np.ndarray:
+    return np.asarray(float(np.asarray(A, dtype=float).sum()) / 2.0)
+
+
+def _triangle_count(A: np.ndarray) -> np.ndarray:
+    """Triangles = trace(A^3)/6, the classical count."""
+    M = np.asarray(A, dtype=float)
+    return np.asarray(float(np.trace(M @ M @ M)) / 6.0)
+
+
+def _x_degrees(A) -> list:
+    M = _mat(A)
+    return [sum(M.row(i)) for i in range(M.rows)]
+
+
+def _x_edge_count(A):
+    M = _mat(A)
+    return sum(M) / 2
+
+
+def _x_triangle_count(A):
+    M = _mat(A)
+    return (M * M * M).trace() / 6
+
+
 def _sub(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.asarray(a, dtype=float).ravel() - np.asarray(b, dtype=float).ravel()
 
@@ -271,6 +301,12 @@ CONSTRUCTORS: dict[str, dict] = {
     "incenter": {"fn": _incenter, "exact": _x_incenter, "arity": 1,
                  "doc": "incenter of a triangle (3, d); uses side lengths, so "
                         "it is algebraic-but-not-rational — no Lean stamp"},
+    "degrees": {"fn": _degrees, "exact": _x_degrees, "arity": 1,
+                "doc": "vector of vertex degrees of a graph (adjacency matrix in)"},
+    "edge_count": {"fn": _edge_count, "exact": _x_edge_count, "arity": 1,
+                   "doc": "number of edges of a graph"},
+    "triangle_count": {"fn": _triangle_count, "exact": _x_triangle_count, "arity": 1,
+                       "doc": "number of triangles of a graph (trace(A^3)/6)"},
     "intersect_lines": {"fn": _intersect_lines, "exact": _x_intersect_lines, "arity": 4,
                         "doc": "intersection of line AB with line CD in 2D "
                                "(A, B, C, D); raises if they are parallel"},

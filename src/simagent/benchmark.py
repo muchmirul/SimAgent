@@ -49,6 +49,11 @@ EXPECTED: dict[str, tuple[str, str, str]] = {
         "counterexample", "sandbox+lean",
         "false: the margin is (x-1)^2+(y-1)^2-1, negative on the unit disc at (1,1)",
     ),
+    "graph-triangle-threshold": (
+        "counterexample", "sandbox",
+        "false: a 5-edge triangle-free graph on 5 vertices exists (C5, and "
+        "others); found by enumerating all 1024 graphs",
+    ),
     "conditional-cubic": (
         "no_counterexample", "sandbox+lean",
         "true for x >= 0 only (false at x = -2): proved by a certificate that "
