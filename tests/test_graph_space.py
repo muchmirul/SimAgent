@@ -23,7 +23,7 @@ def test_graph_space_obeys_the_space_contract():
     rng = np.random.default_rng(0)
     A = g.sample(rng)
     assert g.valid(A) and A.shape == (5, 5)
-    assert g.count() == 1 << 10
+    assert g.count() == 1 << 10  # full enumeration is the sound default
     cases = g.enumerate_cases()
     assert len(cases) == 1024
     assert all(g.valid(c) for c in cases)
@@ -91,3 +91,55 @@ def test_graph_scene_draws_the_edges():
     segments = [p for p in prims if p.get("type") == "segments"]
     assert segments, "a graph with edges must render them"
     assert any(p.get("type") == "points" for p in prims)
+
+
+def test_enumeration_is_reduced_by_symmetry():
+    """Vertex names carry no mathematical content, so relabellings are the same
+    object. The class counts are the known sequence (OEIS A000088), which is a
+    sharp check that the reduction is exact: neither lossy nor redundant."""
+    known = {2: 2, 3: 4, 4: 11, 5: 34, 6: 156}
+    for n, classes in known.items():
+        g = GraphSpace(n=n, up_to_iso=True)
+        assert len(g.enumerate_cases()) == classes, n
+        assert g.count() == classes, n
+        # and it is OPT-IN: the sound default still checks every labelling
+        assert GraphSpace(n=n).count() == 1 << (n * (n - 1) // 2), n
+
+
+def test_reduction_loses_no_graph():
+    """Completeness: every labelled graph must be isomorphic to exactly one
+    representative, or the enumeration would silently skip cases."""
+    import itertools
+
+    g = GraphSpace(n=4, up_to_iso=True)
+    reps = g.enumerate_cases()
+    perms = list(itertools.permutations(range(4)))
+    covered = set()
+    for A in reps:
+        for p in perms:
+            covered.add(A[np.ix_(p, p)].astype(np.int8).tobytes())
+    pairs = [(i, j) for i in range(4) for j in range(i + 1, 4)]
+    for mask in range(1 << len(pairs)):
+        B = np.zeros((4, 4))
+        for b, (i, j) in enumerate(pairs):
+            B[i, j] = B[j, i] = float((mask >> b) & 1)
+        assert B.astype(np.int8).tobytes() in covered, f"missed graph {mask}"
+
+
+def test_symmetry_reduction_refuses_a_label_sensitive_claim():
+    """The reduction is sound only for a property that cannot see labels. A
+    claim about vertex 0 and vertex 1 by name must not be reduced, and saying
+    so is the harness's job - silently skipping cases would be a false proof."""
+    import dataclasses
+
+    from simagent.search import run_exhaustive
+
+    claim = get("graph-triangle-threshold")
+    # "is there an edge between vertices 0 and 1" is about the LABELS
+    label_sensitive = dataclasses.replace(
+        claim,
+        measure={"kind": "expr", "margin": "G[0][1] - 0.5"},
+        certify=None, constraint=None,
+    )
+    with pytest.raises(ValueError, match="distinguishes relabelled copies"):
+        run_exhaustive(label_sensitive)

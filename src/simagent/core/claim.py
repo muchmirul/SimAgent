@@ -460,7 +460,7 @@ class Claim:
         for name, space in self.spaces.items():
             kind = "real"
             if isinstance(space, GraphSpace):
-                kind = "graph"
+                kind = "graph_iso" if space.up_to_iso else "graph"
             elif isinstance(space, IntBox):
                 kind = "int"
             out.append(FreeVar(name=name, shape=list(space.shape),
@@ -485,7 +485,8 @@ class Claim:
             "latex": self.latex, "quantifier": self.quantifier,
             "spaces": [
                 {"name": n, "shape": list(s.shape), "low": s.low, "high": s.high,
-                 "kind": ("graph" if isinstance(s, GraphSpace)
+                 "kind": (("graph_iso" if s.up_to_iso else "graph")
+                          if isinstance(s, GraphSpace)
                           else "int" if isinstance(s, IntBox) else "real")}
                 for n, s in self.spaces.items()
             ],
@@ -506,8 +507,9 @@ class Claim:
         spaces: dict[str, Space] = {}
         for s in data["spaces"]:
             shape = tuple(s["shape"])
-            if s.get("kind") == "graph":
-                spaces[s["name"]] = GraphSpace(n=int(shape[0]))
+            if s.get("kind") in ("graph", "graph_iso"):
+                spaces[s["name"]] = GraphSpace(
+                    n=int(shape[0]), up_to_iso=s.get("kind") == "graph_iso")
             elif s.get("kind") == "int":
                 spaces[s["name"]] = IntBox(shape=shape, low=int(s["low"]), high=int(s["high"]))
             else:

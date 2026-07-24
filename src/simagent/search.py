@@ -176,6 +176,26 @@ def run_exhaustive(spec: ProblemSpec, cap: int = EXHAUSTION_CAP) -> SearchReport
 
     spaces = spaces_for(spec)
 
+    # A space that enumerates only up to symmetry covers the domain ONLY if the
+    # claim cannot tell the symmetric copies apart. Spot-check it and refuse on
+    # a violation: skipping real cases while calling the result exhaustive
+    # would be the worst kind of false verdict.
+    for name, space in spaces.items():
+        if not getattr(space, "up_to_iso", False):
+            continue
+        rng = np.random.default_rng(0)
+
+        def one(value, _name=name):
+            res = _safe_check(comp, {_name: value})
+            return None if res is None else (res.holds, res.margin)
+
+        if not space.respects_relabelling(one, rng):
+            raise ValueError(
+                f"{spec.id}: {name} enumerates up to symmetry, but the claim's "
+                "check distinguishes relabelled copies, so the reduced "
+                "enumeration would skip real cases"
+            )
+
     def var_cases(v):
         return spaces[v.name].enumerate_cases()
 

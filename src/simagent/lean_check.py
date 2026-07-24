@@ -41,6 +41,11 @@ def _strip_comments(src: str) -> str:
 
 def lean_binary() -> str | None:
     env = os.environ.get("SIMAGENT_LEAN")
+    if env and env.strip().lower() in ("off", "none", "0", "false"):
+        # Deliberate opt-out. Lean is optional, and a user without it must get
+        # honest sandbox verdicts rather than a broken run, so that path has to
+        # be reachable on a machine that HAS the toolchain.
+        return None
     if env and Path(env).exists():
         return env
     found = shutil.which("lean")

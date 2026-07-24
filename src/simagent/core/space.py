@@ -149,11 +149,16 @@ class IntBox(Space):
 def from_varspec(v) -> Space:
     """Adapter from the historical VarSpec (name/shape/low/high/kind)."""
     shape = tuple(v.shape)
-    if v.kind == "graph":
-        return GraphSpace(n=int(shape[0]))
+    if v.kind in ("graph", "graph_iso"):
+        return GraphSpace(n=int(shape[0]), up_to_iso=v.kind == "graph_iso")
     if v.kind == "int":
         return IntBox(shape=shape, low=int(v.low), high=int(v.high))
     return Box(shape=shape, low=float(v.low), high=float(v.high))
+
+
+# enumeration is deterministic and reused by count()/exhaust(); computing it
+# once per vertex count keeps a 7-vertex run from redoing seconds of work
+_GRAPH_CLASSES: dict[tuple[int, bool], list] = {}
 
 
 @dataclass(frozen=True)
@@ -171,6 +176,13 @@ class GraphSpace(Space):
     """
 
     n: int
+    # Relabelling the vertices does not change the graph, so one representative
+    # per isomorphism class is enough - BUT only for a property that cannot
+    # tell the labels apart. A margin may index the adjacency matrix directly
+    # ("G[0][1]"), which is a statement about vertex 0 and vertex 1 by name, so
+    # this reduction is OPT-IN and the claim declares it. Default off: a full
+    # enumeration is always sound.
+    up_to_iso: bool = False
 
     @property
     def shape(self) -> tuple[int, ...]:  # type: ignore[override]
@@ -218,15 +230,78 @@ class GraphSpace(Space):
         return A
 
     def enumerate_cases(self) -> list[np.ndarray] | None:
-        total = self.count()
-        if total is None or total > 1 << 20:
+        """Every graph, up to relabelling.
+
+        Vertex names carry no mathematical content, so two graphs that differ
+        only by a permutation of labels are the same object and checking both
+        is wasted work. Keeping one representative per isomorphism class is
+        the cheapest real scaling win a discrete space has: on 5 vertices it
+        turns 1024 labelled graphs into 34, and the gap widens fast (2^45
+        labelled graphs on 10 vertices, about 12 million classes).
+
+        This is a COMPLETE enumeration of the claim's domain, not a sample:
+        every labelled graph is isomorphic to some representative, and every
+        measure the harness can express is isomorphism-invariant because it is
+        built from the adjacency matrix alone.
+        """
+        cached = _GRAPH_CLASSES.get((self.n, self.up_to_iso))
+        if cached is not None:
+            return cached
+        pairs = self._pairs()
+        m = len(pairs)
+        total = 1 << m
+        if total > 1 << 22:
             return None
-        m = len(self._pairs())
-        return [self._from_bits([(mask >> b) & 1 for b in range(m)])
-                for mask in range(total)]
+        # Relabelling permutes EDGE SLOTS, so each vertex permutation becomes a
+        # fixed shuffle of bit positions. Walking each graph's orbit once and
+        # striking it out beats canonicalising every mask separately.
+        if not self.up_to_iso:
+            every = [self._from_bits([(mask >> b) & 1 for b in range(m)])
+                     for mask in range(total)]
+            _GRAPH_CLASSES[(self.n, False)] = every
+            return every
+        slot = {pair: i for i, pair in enumerate(pairs)}
+        bit_maps = []
+        for perm in itertools.permutations(range(self.n)):
+            bit_maps.append([slot[tuple(sorted((perm[i], perm[j])))] for i, j in pairs])
+        seen = bytearray(total)
+        out: list[np.ndarray] = []
+        for mask in range(total):
+            if seen[mask]:
+                continue
+            out.append(self._from_bits([(mask >> b) & 1 for b in range(m)]))
+            for bit_map in bit_maps:
+                image = 0
+                for b, target in enumerate(bit_map):
+                    if (mask >> b) & 1:
+                        image |= 1 << target
+                seen[image] = 1
+        _GRAPH_CLASSES[(self.n, True)] = out
+        return out
 
     def count(self) -> int | None:
-        return 1 << len(self._pairs())
+        """Number of cases actually checked."""
+        if not self.up_to_iso:
+            return 1 << len(self._pairs())
+        cases = self.enumerate_cases()
+        return len(cases) if cases is not None else None
+
+    def respects_relabelling(self, check, rng: np.random.Generator,
+                             samples: int = 40) -> bool:
+        """Spot-check that `check` cannot tell vertex labels apart.
+
+        This CATCHES a wrong `up_to_iso` declaration; it does not prove the
+        right one. Reducing by symmetry when the property is label-sensitive
+        would skip real cases, so a violation must stop the run.
+        """
+        perms = list(itertools.permutations(range(self.n)))
+        for _ in range(samples):
+            A = self.sample(rng)
+            base = check(A)
+            for p in [perms[int(rng.integers(len(perms)))] for _ in range(3)]:
+                if check(A[np.ix_(p, p)]) != base:
+                    return False
+        return True
 
     @property
     def int_exact(self) -> bool:

@@ -229,8 +229,10 @@ def validate_spec(spec: ProblemSpec, samples: int = 8, seed: int = 0) -> list[st
     if not spec.domain:
         errors.append("domain must declare at least one variable")
     for v in spec.domain:
-        if v.kind not in ("real", "int", "graph"):
-            errors.append(f"{v.name}: kind must be 'real', 'int' or 'graph', got {v.kind!r}")
+        if v.kind not in ("real", "int", "graph", "graph_iso"):
+            errors.append(
+                f"{v.name}: kind must be 'real', 'int', 'graph' or 'graph_iso', "
+                f"got {v.kind!r}")
         if v.high < v.low:
             errors.append(f"{v.name}: low ({v.low}) must be <= high ({v.high})")
         if v.kind == "int" and (float(v.low) != int(v.low) or float(v.high) != int(v.high)):

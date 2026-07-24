@@ -30,7 +30,9 @@ CLAIM = Claim(
         r"G \text{ contains } K_3"
     ),
     quantifier="forall",
-    spaces={"G": GraphSpace(n=5)},
+    # edge and triangle counts cannot tell vertex labels apart, so one
+    # representative per isomorphism class covers the domain: 34, not 1024
+    spaces={"G": GraphSpace(n=5, up_to_iso=True)},
     recipe=[
         {"name": "E", "ctor": "edge_count", "args": ["G"]},
         {"name": "T", "ctor": "triangle_count", "args": ["G"]},
