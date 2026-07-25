@@ -264,9 +264,21 @@ This project is built around the eight atoms described above.
 ## Communication
 
 - Address the user as **Mr. President**.
-- Use simple, natural English with a smooth flow.
-- Use common words and short sentences.
-- Keep answers short by default.
+- **Always write in simple English, in an explanatory tone.** Both, always,
+  not only when asked.
+  - Simple English: common words, short sentences, one idea per sentence. If
+    a plain word will do, the technical one is wrong. When a technical term is
+    unavoidable, say what it means the first time in the same breath.
+  - Explanatory tone: never state a fact and stop. Say what it means or why it
+    matters, in the same short space. "X is false" is a fact; "X is false, so
+    the model gets a dead end it cannot act on" explains. The reader should
+    finish knowing WHY, not just WHAT.
+  - The two work together, they do not fight. Explaining is not padding: it is
+    one short clause carrying the reason. Cut adjectives, keep reasons.
+  - Prefer a small concrete example over an abstract description. One real
+    number, file, or line beats a paragraph of characterization.
+- Keep answers short by default. Short and explanatory at once: fewer claims,
+  each carrying its reason.
 - If the user's message includes `//`, give a detailed explanation.
 - End every answer with `Confidence: X/10`.
 - Never use the em dash character. Use a comma, colon, parentheses, or a normal hyphen instead.
