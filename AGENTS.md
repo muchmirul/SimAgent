@@ -67,7 +67,12 @@ Each module is described once, here. State it nowhere else.
   and being a DIRECT (deductive) method it returns None unless the Lean kernel
   accepts the certificate. It requires a STRICT certificate (margin >= eps >
   0); eps == 0 proves only margin >= 0, which does not settle a strict claim,
-  so it is never upgraded.
+  so it is never upgraded. Two instruments reuse that same SOS-plus-Lean
+  machinery: `cases_proof()` (the MODEL picks the split coordinate and value;
+  the harness certifies both halves) and `induction_proof()` (unbounded over
+  the naturals: base case positive, step case margin(n+1) - margin(n) a sum of
+  squares). Every such proof still bottoms out in a kernel-accepted
+  certificate, so all three are Lean-or-nothing.
 - `lean_check.py` + `sandbox/leangen.py` — generated Lean 4 *core*
   certificates (`by decide`, rationals as integer pairs), checked with a bare
   `lean file.lean`. The toolchain IS installed (`~/.elan/bin/lean`, Lean
@@ -104,9 +109,13 @@ Each module is described once, here. State it nowhere else.
 - `core/derive.py` holds the geometry kit and CONSTRUCTORS. EVERY constructor
   must carry an `exact` counterpart, because `_exact_recipe_env` replays the
   recipe in rational arithmetic so a margin may read a derived entity and
-  still certify. Lean takes only FREE variables as atoms: a certificate over a
-  derived value would check a bare number and prove nothing about how it was
-  constructed, so claims with a recipe top out at `sandbox`.
+  still certify. Lean takes only FREE variables as atoms, so the `recipe` Lean
+  hook PINS each construction to its defining equations
+  (`leangen.RECIPE_PINS`: circumcenter, orthocenter, barycentric, centroid,
+  midpoint) and the kernel checks how the numbers were built. A constructor
+  with no pin RAISES and the claim keeps its `sandbox` stamp, because a
+  certificate over an unpinned derived value would check a bare number and
+  prove nothing about its construction.
 - `core/journal.py` is the mind trace. `trace.py` is a compatibility shim that
   re-exports it; new code imports `core.journal` directly.
 - `views/` is the eighth atom plus the analytical output views: `identity`
@@ -119,15 +128,18 @@ Each module is described once, here. State it nowhere else.
 
 **Problems in, answers out**
 
-- `library/` contains eight bundled native Claims (zero exec'd code: a recipe
+- `library/` contains eleven bundled native Claims (zero exec'd code: a recipe
   plus registry keys): circumcenter in triangle / tetrahedron / 4-simplex,
-  orthocenter in triangle, sum of squares vs linear, positive quadratic, sum
-  of odds, Euler polyhedron. Every bundled Claim is a known-answer test. The
-  triangle Claim is the LLM few-shot example. Four carry a specific job:
+  orthocenter in triangle, sum of squares vs linear, positive quadratic,
+  conditional cubic, unbounded quadratic, sum of odds, Euler polyhedron, graph
+  triangle threshold. Every bundled Claim is a known-answer test and `simagent
+  bench` scores 11/11. The triangle Claim is the LLM few-shot example. Four
+  carry a specific job:
   `sum-of-squares-vs-linear` (vocabulary) has margin (x-1)²+(y-1)²-1, so the
   field view's zero-contour is that unit circle, the algebraic echo of Thales;
   `orthocenter-in-triangle` (geometry kit) has a margin over a DERIVED entity,
-  which certification reaches only by replaying the recipe exactly;
+  which certification reaches only by replaying the recipe exactly and Lean
+  only by pinning each construction;
   `positive-quadratic` (proving) is the TRUE twin of `sum-of-squares-vs-linear`
   with one constant changed, proved outright by a Lean-checked sum-of-squares
   certificate rather than left as evidence; `circumcenter-in-4simplex` (ℝ⁴) is
@@ -169,10 +181,10 @@ Each module is described once, here. State it nowhere else.
   (the HTTP control service), `cli.ts`, `index.ts`.
 - `pi_agent.py` is the web app's thin Python client for that service. It
   transports commands only; no response from it can mint a verdict.
-- Closed agent tools: plan, look, sample, set_var, nudge, check, measure,
+- Closed agent tools (20): plan, look, sample, set_var, nudge, check, measure,
   view, imagine, refine, hunt, exhaust, certify, sum_of_squares,
-  submit_lean_proof, construct, expect, finish. TypeScript exposes no pi
-  coding tools and no discovered resources.
+  prove_by_cases, prove_by_induction, submit_lean_proof, construct, expect,
+  finish. TypeScript exposes no pi coding tools and no discovered resources.
 - Every run writes `trace.jsonl` (thought, action, scene, equation, diff
   cells) and `kernel-journal.jsonl` (replayable calls and state hashes).
   Comments enter pi with `session.steer()` and are journaled as
@@ -206,9 +218,10 @@ Each module is described once, here. State it nowhere else.
   'spec-generated-review-needed' unless `library.is_bundled(spec)`.
 - The model picks the proof method; the harness only hands it instruments.
   Calling an instrument IS the declaration (hunt = counterexample, construct +
-  certify = construction, exhaust = exhaustion, sum_of_squares = direct); the
-  other six of the ten methods finish through submit_lean_proof. Never add a
-  tool that decides the method for the model.
+  certify = construction, exhaust = exhaustion, sum_of_squares = direct,
+  prove_by_cases = cases, prove_by_induction = induction); the other four of
+  the ten methods finish through submit_lean_proof. Never add a tool that
+  decides the method for the model.
 - Every instrument must explain its failures. `sos.find_sos`/`prove_positive`
   and `proof.sos_proof` take a `notes` list and append the REASON at each
   refusal (tight/equality case, Gram matrix not PSD, odd degree, wrong

@@ -53,17 +53,23 @@ uv venv .venv && uv pip install -p .venv/bin/python -e ".[dev]"
 .venv/bin/simagent solve circumcenter-in-tetrahedron --trials 2000
 ```
 
-Five conjectures are bundled and run fully offline — each is a known-answer
-test for the whole machine, and all are **native claims** (a closed vocabulary
-of spaces, construction recipes and registry measures — no generated code is
-ever exec'd):
+Eleven conjectures are bundled and run fully offline. Each is a known-answer
+test for the whole machine (`simagent bench` scores 11/11), and all are
+**native claims** (a closed vocabulary of spaces, construction recipes and
+registry measures — no generated code is ever exec'd):
 
 | id | truth | method the harness reaches |
 |---|---|---|
 | `circumcenter-in-triangle` | false | **counterexample**, `sandbox+lean` |
 | `circumcenter-in-tetrahedron` | false | **counterexample**, `sandbox+lean` |
 | `circumcenter-in-4simplex` (ℝ⁴!) | false | **counterexample**, `sandbox` — no Lean above d=3, stated explicitly |
+| `orthocenter-in-triangle` | false | **counterexample**, `sandbox+lean` — margin over a DERIVED entity; the recipe hook pins the construction |
+| `sum-of-squares-vs-linear` | false | **counterexample**, `sandbox+lean` |
+| `graph-triangle-threshold` | false | **counterexample**, `sandbox` — `GraphSpace`, no Lean hook yet |
 | `sum-of-odds-square` | true (bounded) | **exhaustion** — all 201 cases + Lean `decide` |
+| `positive-quadratic` | true | **direct** (sum of squares), `sandbox+lean` |
+| `conditional-cubic` | true (for x ≥ 0) | **direct**, `sandbox+lean` |
+| `unbounded-quadratic` | true | **direct**, `sandbox+lean` |
 | `euler-characteristic-hull` | true | no proof — *evidence only*, and it says so |
 
 The ℝ⁴ entry is the point: the core is dimension-agnostic. Dimension enters
