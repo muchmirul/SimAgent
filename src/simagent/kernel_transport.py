@@ -353,6 +353,26 @@ class KernelTransport:
         self._write(record)
         return self.snapshot()
 
+    def set_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record WHICH model is driving this run.
+
+        SimAgent harnesses whatever model pi routes, so a result is only
+        attributable and comparable if the run says which one produced it.
+        This is provenance about the run, not an event in the world's history,
+        so it is deliberately NOT a journal record: writing one would shift
+        every sequence number and change what a branch prefix means.
+        """
+        if self._closed:
+            raise RuntimeError("kernel transport is finalized")
+        if not isinstance(payload, dict):
+            raise ValueError("runtime payload must be an object")
+        for field in ("provider", "model"):
+            value = payload.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"runtime payload needs a non-empty {field}")
+        self.run.runtime_info = {k: payload[k] for k in sorted(payload)}
+        return self.snapshot()
+
     def annotate(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Journal narrative metadata without changing proof or world state."""
         if self._closed:
@@ -513,6 +533,8 @@ def serve(transport: KernelTransport, stdin: TextIO = sys.stdin, stdout: TextIO 
                     result = transport.note_thought(
                         request.get("text"), request.get("kind") or "text"
                     )
+                elif op == "runtime":
+                    result = transport.set_runtime(request.get("payload") or {})
                 elif op == "annotate":
                     result = transport.annotate(
                         request.get("kind"), request.get("payload") or {}

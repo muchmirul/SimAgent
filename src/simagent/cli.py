@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -131,7 +132,18 @@ def _cmd_agent(args) -> int:
         if not (args.provider and args.model):
             raise SystemExit("--provider and --model must be given together")
         command.extend(["--provider", args.provider, "--model", args.model])
-    return subprocess.run(command, cwd=repo_root, check=False).returncode
+    else:
+        print(
+            "no --provider/--model given: pi routes the first authenticated "
+            "vision model it has. SimAgent harnesses whichever one that is; "
+            "the run records it in runtime.json and agent_summary.md."
+        )
+    code = subprocess.run(command, cwd=repo_root, check=False).returncode
+    who = out / "runtime.json"
+    if who.is_file():
+        info = json.loads(who.read_text())
+        print(f"Model: {info.get('provider')}/{info.get('model')}")
+    return code
 
 
 def _cmd_web(args) -> int:

@@ -363,6 +363,9 @@ class AgentRun:
         self.finished = False
         self.stop_requested = False
         self.summary = ""
+        # which model pi routed to this run; SimAgent harnesses any of them, so
+        # the run has to say which one produced it
+        self.runtime_info: dict = {}
         self._transcript = (self.out / "transcript.jsonl").open("w")
         # The mind trace: thought + act + scene + equation per step, replayable
         # in the web UI's Mind panel (narrative only — proof.json stays boss).
@@ -818,10 +821,20 @@ class AgentRun:
             artifacts["proof"] = proof_mod.save_proof(proof, self.out)
             if proof.lean_file:
                 artifacts["lean"] = proof.lean_file
+        who = self.runtime_info
+        provenance = (
+            f"Model: {who.get('provider', '?')}/{who.get('model', '?')}"
+            + (f" (thinking: {who['thinkingLevel']})" if who.get("thinkingLevel") else "")
+            if who else
+            "Model: not recorded (the run did not report which model pi routed)"
+        )
         (self.out / "agent_summary.md").write_text(
             "# Agent summary (the model's narrative — see proof.json for what is verified)\n\n"
+            + provenance + "\n\n"
             + self.summary
         )
+        if who:
+            (self.out / "runtime.json").write_text(json.dumps(who, indent=2))
         artifacts["agent_summary"] = str(self.out / "agent_summary.md")
         artifacts["transcript"] = str(self.out / "transcript.jsonl")
         artifacts["trace"] = str(self.trace.path)

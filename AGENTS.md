@@ -33,6 +33,16 @@ build anything.**
   thinking? Capability, perception, verification and memory are ours; strategy,
   insight and the choice of proof method are the model's. An instrument reports
   its own limits but never names the next method to try.
+- **Any model pi routes.** SimAgent harnesses whatever model pi selects; there
+  is no blessed provider, and a coding model driving a run is normal. With no
+  `--provider/--model` the runtime takes the first authenticated VISION model
+  pi has, so the choice must never be silent: `KernelTransport.set_runtime`
+  records provider/model as run PROVENANCE (`runtime.json` plus the
+  `agent_summary.md` header), the CLI prints it, and an unrecorded model is
+  said plainly rather than left blank. It is deliberately not a journal record
+  — writing one would shift every sequence number and change what a branch
+  prefix means. Any claim about agent behaviour must name the model, or it is
+  not a claim about anything.
 
 ## Commands
 
@@ -86,9 +96,13 @@ Each module is described once, here. State it nowhere else.
   hulls), `certify.py` (sympy exact mirror + rationalization), `scene.py`
   (renderer-agnostic scene-graph primitives), `sos.py` (exact rational
   sum-of-squares search: monomial basis, Gram matrix, symmetric elimination
-  for the PSD split). The SOS search is deliberately INCOMPLETE and says so:
-  it pins the Gram matrix's free parameters at zero instead of solving an SDP,
-  so a failure means "no certificate found", never "none exists".
+  for the PSD split, plus `constraints` so a claim's own hypotheses join the
+  identity as `p - eps = sigma_0 + sum sigma_k g_k`). Free Gram parameters are
+  tried at zero first, then by alternating projection between the affine set
+  and the PSD cone, then snapped back to rationals; every candidate is
+  re-checked exactly, so the numeric step can only propose. The search is
+  still INCOMPLETE and says so: a failure means "no certificate found", never
+  "none exists".
 
 **The eight atoms**
 

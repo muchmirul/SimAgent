@@ -287,6 +287,13 @@ export class KernelClient {
     return snapshot;
   }
 
+  /** Record which model pi routed, as run provenance (not a journal event). */
+  async setRuntime(payload: Record<string, unknown>): Promise<KernelSnapshot> {
+    const snapshot = await this.request<KernelSnapshot>({ op: "runtime", payload });
+    this.tip = snapshot;
+    return snapshot;
+  }
+
   async annotate(
     kind: "user_comment" | "provenance",
     payload: Record<string, unknown>,

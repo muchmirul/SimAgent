@@ -458,6 +458,15 @@ export async function createSimAgentRuntime(
     // sequential (the latter is set in createKernelTools()).
     session.agent.toolExecution = "sequential";
 
+    // Put the model on the record. SimAgent harnesses whatever model pi
+    // routes, so a run is only attributable and comparable if it says which
+    // one produced it; without this the only trace lives outside the run dir.
+    await kernel.setRuntime({
+      provider: model.provider,
+      model: model.id,
+      thinkingLevel: options.thinkingLevel ?? "off",
+    });
+
     // Tool implementations return kernel error metadata instead of throwing so
     // image/text blocks and terminal hints survive. Convert that metadata into
     // Pi's canonical isError flag in the post-tool hook.
