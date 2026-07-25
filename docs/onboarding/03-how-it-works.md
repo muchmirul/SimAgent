@@ -160,6 +160,24 @@ arithmetic. Five constructors carry pins today: `circumcenter`, `orthocenter`,
 without a pin raises, on purpose, and the claim keeps its `sandbox` stamp rather
 than quietly accepting a weaker certificate.
 
+## The same state, written four ways
+
+Nothing above keeps a second version of the truth. One configuration is
+rewritten at each stage, and each rewriting buys exactly one thing.
+
+| Form | Where it is used | What it buys |
+|---|---|---|
+| Floating point, numpy | Sampling and annealing | Speed. A float can only ever *propose* a candidate, which is why search on its own proves nothing |
+| Exact fractions, sympy | `certify` | A verdict that does not depend on floating point. This is the `sandbox` rung |
+| Integer pairs, Lean | The certificate | A verdict that does not depend on this codebase at all. This is the `sandbox+lean` rung |
+| The scene graph | Every picture | Perception. matplotlib, Manim and the browser read the same JSON, so the shape you click is the shape the agent saw |
+
+There is a fifth form, and it is for reading only. `equation_of_state()` in
+[`core/journal.py`](../../src/simagent/core/journal.py) turns the current state
+into equations for the trace, and nothing flows back from it into the world.
+That direction is the project's thesis in one line: the executable state is the
+working object, and the symbols are its record.
+
 ## The eight atoms
 
 Everything above composes from eight primitives. Seven live in

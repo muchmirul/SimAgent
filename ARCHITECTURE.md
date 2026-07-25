@@ -201,6 +201,8 @@ domains are rejected; case counting uses Python ints (no `np.prod` overflow).
 
 ## Data flow
 
+A batch run (`simagent solve`):
+
 ```
 conjecture ──(llm.formalize, sandbox-validated)──▶ Claim (recipe + registry keys, no exec'd code)
 Claim ──▶ search: run_exhaustive (finite int domains: EVERY case)
@@ -211,6 +213,43 @@ report ──▶ proof.mechanized_proof ──▶ Proof {method, claim, verified
 Proof + report ──▶ answer.md / answer.tex / conjecture.lean / proof.json
 scene graph ──▶ matplotlib preview │ Manim still/video │ three.js live view
 ```
+
+An agent run reaches that same kernel through four processes. The last hop
+lands back in PYTHON, which is the trust argument in one line: the model is in
+the middle of the chain, never at the end of it.
+
+```
+browser
+  │ HTTP: a problem id, or free text that llm.py formalizes into a Claim first
+  ▼
+web/app.py ──JSONL──▶ pi_agent.py ──JSONL──▶ agent/dist/service.js
+                                                │ model chosen ONCE at start;
+                                                │ one model turn = one tool call
+                                                ▼
+                                          kernel-client.ts ──spawn (one kernel per run)
+                                                │ JSONL
+                                                ▼
+                                     kernel_transport.py ──▶ AgentRun
+                                                │
+  Ops mutate the world · derive recomputes · the measure returns the margin
+                                                │
+  ├──▶ tool result to the model (text; `look` returns a real PNG: the vision channel)
+  ├──▶ kernel-journal.jsonl (call + state hash) and trace.jsonl (the cell)
+  └──▶ finish: mechanized_proof stamps verified_by ──▶ proof.json + answer.md ──▶ verdict cell
+```
+
+The notebook server and the run's kernel are DIFFERENT Python processes. The
+server renders and transports; it holds no world state, so no browser action
+can reach a verdict except by going the whole way round.
+
+**One state, four representations.** The same configuration is rewritten at
+each stage, and each rewrite buys one specific thing: float (numpy) buys speed
+for search and can only ever PROPOSE; exact rational (sympy) buys a verdict
+independent of floating point; Lean integer pairs buy a verdict independent of
+this codebase; the scene graph buys perception, and feeds mpl, Manim and
+three.js from one source so the picture a human clicks is the one the agent
+saw. `equation_of_state` adds a fifth, for reading only: symbols follow the
+world, never the reverse.
 
 ## Agent mode (pi control plane)
 

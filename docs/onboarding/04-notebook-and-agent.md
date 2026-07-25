@@ -173,6 +173,26 @@ separate is what makes the trust rule survive: a comment enters pi as a user
 turn and is journaled as `user_comment`, and the annotation must leave the
 kernel state hash unchanged. Narrative and proof state cannot touch.
 
+## Where your problem actually goes
+
+Pressing **Run agent** starts a chain of four processes. It is worth seeing
+once, because the shape of the chain is the reason a model cannot fake a result.
+
+1. The **browser** posts the problem to the notebook server.
+2. The **notebook server**, Python and FastAPI, formalizes free text with Claude
+   if you typed a sentence, then hands the claim to the pi service through a
+   thin client.
+3. The **pi service**, TypeScript, picks the model once, opens a session whose
+   only tools are SimAgent's twenty, and runs the model turns.
+4. For every tool the model calls, the service passes the call to a **private
+   Python kernel** started for that run. The kernel changes the world, computes
+   the margin, and sends the result back, with a real image for `look`.
+
+The chain ends in Python, not in the model. The model sits in the middle: it
+chooses what to try next, and the process at the far end decides what actually
+happened. The notebook server and the run's kernel are also two separate Python
+processes, so nothing you do in the browser reaches the world directly.
+
 ## Who owns what
 
 | Side | Owns |
