@@ -1,5 +1,9 @@
 # SimAgent - simple guide
 
+This guide assumes you know what SimAgent is and want to operate it. If you do
+not, read [docs/onboarding/](docs/onboarding/) first: it starts from zero and
+explains the ideas this page only uses.
+
 ## 1. How pi fits into SimAgent
 
 Pi is embedded inside SimAgent as the model runtime. The normal `pi` terminal
@@ -18,9 +22,14 @@ uv pip install -p .venv/bin/python -e ".[dev]"
 ```
 
 The last command opens the exact pi version pinned by SimAgent. Inside pi,
-enter `/login`, authenticate an OpenAI Codex account, then quit pi.
-On this machine, `openai-codex/gpt-5.6-sol` is already authenticated through
-OAuth and supports images. Verify it with:
+enter `/login`, authenticate whichever provider you have, then quit pi. Any
+provider pi supports will do: SimAgent has no blessed model, and it harnesses
+whatever pi routes. The one real requirement is **vision**, because the agent
+works by looking at the scene, so the notebook only offers models that accept
+images.
+
+Check that a provider and model are usable, without printing credentials
+(substitute your own, this is only an example):
 
 ```bash
 node agent/dist/cli.js auth-check \
@@ -73,7 +82,10 @@ The agent's senses and hands, beyond looking and moving points:
 
 ## 3. Run an agent on a bundled problem
 
-1. Under **pi model**, select **openai-codex/gpt-5.6-sol**.
+1. Under **pi model**, pick any model in the dropdown. It lists only the
+   vision-capable models pi has authenticated for you, so anything there works.
+   Whichever you pick is written into the run's `runtime.json`, because a
+   transcript without a model name cannot be compared with another run.
 2. Under **thinking**, select **max**. Maximum thinking is slower and can use
    more account quota.
 3. Set **max turns**. Start with 40.
@@ -103,10 +115,11 @@ The agent's senses and hands, beyond looking and moving points:
    kernel certificate. If nothing was certified, it says so. The agent's
    prose never upgrades a claim.
 
-This selects the same pi provider, GPT-5.6 Sol model, maximum thinking level,
-and vision capability requested for the session. Its environment is different
-from a general coding session: it receives only SimAgent's closed geometry and
-proof tools. Python remains the authority for state changes and verdicts.
+Whichever model you picked, its environment is different from a general coding
+session: it receives only SimAgent's closed geometry and proof tools, no coding
+tools and no file access. Python remains the authority for state changes and
+verdicts, so the model's choice changes how well the run goes, never what the
+run is allowed to claim.
 
 ## 4. Type your own problem
 
@@ -115,15 +128,19 @@ terminal. For example:
 
 > the incenter of every triangle lies inside the triangle
 
-Then press **Run agent**. There are currently two model stages:
+Then press **Run agent**. There are currently two model stages, and they are
+separate models on purpose:
 
 1. Claude formalizes the sentence into a native claim and validates it against
    the closed sandbox registries.
-2. Pi launches GPT-5.6 Sol with maximum thinking to investigate that claim.
+2. Pi launches the model you selected, at the thinking level you selected, to
+   investigate that claim.
 
-The first stage needs `ANTHROPIC_API_KEY` or an `ant auth login` profile. If
-Claude access is not configured, use a bundled problem. Natural-language
-formalization through GPT-5.6 Sol itself is not implemented yet.
+Stage 1 is pinned to Claude because it uses structured output plus a repair
+loop against the registries, and it needs `ANTHROPIC_API_KEY` or an
+`ant auth login` profile. If Claude access is not configured, use a bundled
+problem: those are already formalized, so stage 1 is skipped entirely and any
+pi model can run them.
 
 ## 5. Replay past runs
 
@@ -152,6 +169,12 @@ steered there.
   --out "runs/agent-triangle-$(date +%Y%m%d-%H%M%S)"
 ```
 
+The provider and model above are an example, and the two flags go together or
+not at all. Leave both out and pi routes the first authenticated vision model
+it has; the command says so before it starts, and prints `Model:
+<provider>/<model>` when it ends, so you never have to guess afterwards which
+model produced the run.
+
 The normal pi terminal does not open the SimAgent browser automatically. Use
 `simagent web` for the full live notebook and steering workflow.
 
@@ -167,3 +190,11 @@ Manim env).
 - **numeric candidate**: looks false, but exact check did not confirm. Not proof.
 - **no counterexample found**: evidence it may be true. **Never** a proof;
   proving still needs math/Lean (that's the roadmap).
+
+One more thing to read, in every agent run: **which model produced it**. The
+header of `agent_summary.md`, and the whole of `runtime.json`, name the
+provider, the model and the thinking level. If the run could not report them,
+that line says "not recorded" in words rather than going blank. This matters
+because "the agent got stuck here" is a statement about one model, so without
+the name it is not a statement about anything, and two runs cannot be compared.
+It never touches the verdict: `proof.json` is the same whichever model ran.

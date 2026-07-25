@@ -20,7 +20,7 @@ between is dimension-blind.
 
 | primitive | physical analogy | role |
 |---|---|---|
-| **Space** | configuration space | input boundary: `sample / valid / perturb / exact / enumerate_cases`. v1: `Box(ℝᵈ)`, `IntBox(ℤᵈ)` |
+| **Space** | configuration space | input boundary: `sample / valid / perturb / exact / enumerate_cases`. `Box(ℝᵈ)`, `IntBox(ℤᵈ)`, `GraphSpace` (adjacency matrix, moves flip edges) — the discrete one exists because a graph is an object the box types cannot state at all |
 | **Entity** | particle | named, stable id; *free* (value in a Space) or *derived* (recipe over entities — coordinates are consequences, the CAD lesson) |
 | **Op** | force | THE only mutation channel (Blender lesson) = the agent's action vocabulary; a closed registry replaces exec'd code |
 | **Derive** | physical law | dependency graph; derived entities recompute when ancestors move |
@@ -105,6 +105,31 @@ geometry is where such questions are still open.
 Olympiad inequalities are the benchmark that earns credibility, not the
 destination.
 
+## Which model runs it: any model pi routes
+
+SimAgent harnesses whatever model pi selects. There is no blessed provider and
+no blessed model, and a coding model driving a run is normal rather than a
+compromise: the harness is the subject of the work, so the model is a variable
+in it. Docs that name one model do so as an EXAMPLE, never as a requirement.
+
+That freedom has one cost, and the harness pays it by recording. With no
+`--provider/--model` the runtime takes the first authenticated VISION model pi
+has, which is convenient and silent, and silent is the problem: a transcript
+with no model attached cannot be compared with anything. So the choice is run
+PROVENANCE. `KernelTransport.set_runtime` records provider, model and thinking
+level; `AgentRun.finalize` writes `runtime.json` and puts the same line at the
+top of `agent_summary.md`; `simagent agent` prints it when the run ends. When
+nothing was reported the summary says so in words ("not recorded") instead of
+leaving a blank, because a blank reads as "unknown model" and "no model" alike.
+
+It is deliberately **not** a journal record. The journal's sequence numbers are
+what a branch prefix means, so inserting a provenance entry would renumber
+every step and change which state a branch replays. Provenance is about the run;
+the journal is about the world.
+
+The rule that follows: any claim about agent behaviour must name the model, or
+it is not a claim about anything.
+
 ## The proof kernel (`proof.py`)
 
 Every answer names one of the ten classical proof methods and carries a
@@ -115,13 +140,13 @@ Every answer names one of the ten classical proof methods and carries a
 | counterexample | harness (+ Lean) | exact-rational violation of a ∀; Lean pair-arithmetic certificate |
 | construction | harness (+ Lean) | exact-rational witness of an ∃; same certificate machinery |
 | exhaustion | harness (+ Lean) | every case of a finite integer domain checked; Lean `decide` over the bounded statement |
-| direct | Lean only | |
-| contradiction | Lean only | |
-| contrapositive | Lean only | |
-| induction | Lean only | |
-| cases | Lean only | |
-| combinatorial | Lean only | |
-| infinite descent | Lean only | |
+| direct | Lean only | `sos_proof()`: the margin certified as a sum of squares in exact rationals, then kernel-checked. This is the ONLY route to proving a `∀` over a continuous domain — search can refute one but never establish one |
+| induction | Lean only | `induction_proof()`: base case positive and `margin(n+1) - margin(n)` a sum of squares, so an UNBOUNDED claim over ℕ is settled |
+| cases | Lean only | `cases_proof()`: the model picks the split coordinate and value, the harness certifies both halves by the same SOS machinery |
+| contradiction | Lean only | no instrument; the model writes the Lean |
+| contrapositive | Lean only | no instrument; the model writes the Lean |
+| combinatorial | Lean only | no instrument; the model writes the Lean |
+| infinite descent | Lean only | no instrument; the model writes the Lean |
 
 `verified_by` values, strongest first:
 
@@ -228,6 +253,10 @@ src/simagent/
                  tests/test_layering.py):
                    space.py entity.py op.py derive.py measure.py claim.py
                    journal.py
+                 plus expr.py — the GENERAL vocabulary: one whitelisted
+                 arithmetic AST, three evaluators (float / exact sympy / Lean
+                 Q-term). Any rational inequality over a box is expressible
+                 with no new code, so prefer it over a new one-off measure
   views/         the output boundary: identity, field, sweep, ghost, trajectory
                  (one calibrated visual language: diverging colormap centered
                  at margin 0 — blue HOLDS / red FAILS, zero-contour marked)
@@ -238,10 +267,15 @@ src/simagent/
   sandbox/       geometry.py (numeric, d-generic simplex math + hull_facets),
                  certify.py (sympy exact, any-ndim rationalization),
                  scene.py (scene graph), leangen.py (Lean certs; d<=3 cap
-                 stated explicitly — the LU-witness encoding is the extension)
+                 stated explicitly — the LU-witness encoding is the extension),
+                 sos.py (exact rational sum-of-squares search: the engine
+                 behind every DIRECT proof; incomplete, and every refusal
+                 appends its reason to `notes`)
   answer.py      Markdown / LaTeX / Lean skeleton emitters; states the d>3
                  no-Lean cap explicitly in every verdict it touches
   pipeline.py    one run = claim → search → proof → viz → answers → report.json
+  benchmark.py   `simagent bench`: every bundled Claim run end to end, scored
+                 on verdict AND strength — the one number a change is judged by
   llm.py         formalize (native Claim synthesis from the closed vocabulary,
                  sandbox-vetted) and attempt_proof (Lean-checked, never trusted)
   library/       bundled native Claims — zero exec'd code; known-answer tests

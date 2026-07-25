@@ -14,12 +14,15 @@ core idea of sim agent is this :
 2. as a toll human and ai agent can collaborate on solving, sometimes human get stuck agent help, and sometime human giving idea while agent stuck. this done by seamless ui that human can giving comment on the step that agent do.
 
 Other docs, so you do not duplicate them here: ARCHITECTURE.md (kernel design +
-contributor rules), README.md (what the project is, for a newcomer), GUIDE.md
-(how to use the tool), plan.md (the P0-P7 roadmap), list.md (the ranked work
-list), agent/README.md (the pi package on its own terms).
+contributor rules), README.md (what the project is, for a newcomer),
+docs/onboarding/ (six pages for someone who has never seen the project; start
+there before this file), GUIDE.md (how to use the tool), plan.md (the P0-P7
+roadmap), list.md (the ranked work list), agent/README.md (the pi package on
+its own terms).
 
-**Two standards bind every change. Read ARCHITECTURE.md for both before you
-build anything.**
+**Three standards bind every change. Read ARCHITECTURE.md for all three before
+you build anything** ("Scope: which mathematics this harness serves",
+contributor rule 7, and "Which model runs it: any model pi routes").
 
 - **Scope.** SimAgent serves one machine: a finite-dimensional configuration
   space, a scalar margin whose sign decides the claim, a picture of it, and

@@ -141,6 +141,12 @@ model learns the scene, and it is mechanical, so the model cannot grade itself.
 
 It also accepts `--spec FILE` or `--conjecture "..."`.
 
+The provider and model in the second command are only an example, and the two
+flags go together or not at all. The first command gives neither, so pi routes
+the first authenticated vision model it has, prints that it is doing so, and
+prints `Model: <provider>/<model>` when the run ends. SimAgent has no blessed
+model; it harnesses whichever one pi routes.
+
 A CLI run is viewable in the browser, since the header dropdown lists every
 recorded run and follows a live one. It cannot be steered there, because a
 different controller owns it. Start runs from the browser when you want
@@ -148,15 +154,18 @@ comments, stopping, or branching.
 
 ## What a run leaves behind
 
-On top of the normal run files, an agent run writes two correlated records:
+On top of the normal run files, an agent run writes these:
 
 | File | What it holds |
 |---|---|
 | `trace.jsonl` | The mind trace: thought, action, scene, equation, and diff cells. This is what the notebook replays |
 | `kernel-journal.jsonl` | The replayable world: every kernel call and state hash. This is what a branch verifies against. Written by pi-driven runs, so very old recorded runs may not have one |
-| `agent_summary.md` | The model's own summary of the session |
+| `agent_summary.md` | The model's own summary of the session, with the model that produced it named in the header |
+| `runtime.json` | Which model pi routed: provider, model, thinking level. Read this before comparing two runs, because "the agent stalled here" is a statement about one model |
 | `transcript.jsonl` | The raw conversation |
 | `looks/` | Every image the agent actually saw |
+
+The first two are the correlated pair that matters.
 
 The pi session stores the conversation, the thinking, the steering, and the
 branch tree. The two journals store the reproducible world. Keeping them

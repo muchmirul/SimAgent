@@ -20,6 +20,11 @@ kernel is the sole authority on deduction. Three pillars: **Python** computes,
 **Lean** formulates and verifies, **Manim** visualizes. See
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
+**Never seen this project?** Start at [docs/onboarding/](docs/onboarding/) — six
+short pages that assume no knowledge of the codebase, of Lean, or of proof
+assistants, and walk from one worked example to your first run. This README is
+the summary; that folder is the explanation.
+
 ```mermaid
 flowchart LR
     A["conjecture<br/>natural language"] -->|"LLM formalizer (sandbox-vetted)"| B["native Claim<br/>spaces + recipe + registries"]
@@ -184,10 +189,16 @@ pi                         # use /login for a subscription or API provider
 cd ..
 .venv/bin/simagent agent circumcenter-in-triangle
 
-# Optional explicit pi model:
+# Optional explicit pi model (an example; the two flags go together):
 .venv/bin/simagent agent circumcenter-in-triangle \
-  --provider openai-codex --model gpt-5.4
+  --provider openai-codex --model gpt-5.6-sol
 ```
+
+There is no blessed model. Give no flags and pi routes the first authenticated
+**vision** model it has, since the agent works by looking. Whichever model runs,
+the run records it: `runtime.json`, the header of `agent_summary.md`, and a
+`Model: <provider>/<model>` line printed at the end. That record is provenance,
+not a verdict, and it is what makes "the agent stalled here" mean something.
 
 Every run has two correlated records:
 
@@ -282,8 +293,16 @@ loop.
 - Proof kernel: ten classical methods, `verified_by` trust ladder
 - Lean integration: generated core-Lean certificates (`decide`, axiom-free) for
   counterexample / construction / exhaustion; fail-closed checker
+- Proving, not just refuting: exact rational **sum-of-squares** certificates
+  settle a `∀` over a continuous domain, which no amount of search can do, and
+  the same machinery backs `prove_by_cases` and `prove_by_induction`
+- `simagent bench` — every bundled problem end to end, scored on verdict *and*
+  strength, so a change that weakens a stamp fails loudly
 
 ## Roadmap
 
-Planned work is tracked in
-[GitHub issues](https://github.com/Muchmirul/SimAgent/issues).
+[list.md](list.md) is the ranked work list: what is done, what is left, and why
+each item is worth doing. [plan.md](plan.md) is the long design record behind
+it. The short version of what is left: point the harness at a conjecture nobody
+has settled, and watch more live sessions on problems the model has not seen.
+Everything already built exists to make those two possible.
