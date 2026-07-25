@@ -386,5 +386,24 @@ Keep the final reply short:
 
 Omit any item that has nothing useful to say.
 
-For every code change, also report before → after → impact on the project goal
-and its users.
+## Change reporting (required, every time)
+
+EVERY change is reported as a comparison table. Not prose, not a summary of
+what was done: what was true before, what is true now, and what that buys the
+goal. One row per thing that actually changed.
+
+| what | before | after | impact on the goal |
+|---|---|---|---|
+| <the thing> | <what was true> | <what is true now> | <which pillar it serves, and how> |
+
+Rules:
+
+- The **impact** column names a pillar, not a feature. Pillar 1 is the harness
+  giving a model what it cannot get by thinking; pillar 2 is human and agent
+  unblocking each other. A change that serves neither needs a reason to exist.
+- **Before** must be the real prior state, including when it was "nothing" or
+  "silently wrong". Do not describe the old behaviour more kindly than it was.
+- A row per change, even the small ones. A fix that came out of a bug found
+  along the way is its own row, because that is usually the row that matters.
+- Say plainly when a change buys nothing yet and is groundwork.
+- The table comes BEFORE the prose, so the reader can stop after it.
