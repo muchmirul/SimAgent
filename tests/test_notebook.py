@@ -230,3 +230,34 @@ def test_a_problem_file_joins_the_dropdown_and_starts_by_path(tmp_path, monkeypa
         assert client.post(
             "/api/agent/start", json={"problem_id": "no-such-claim"}
         ).status_code == 404
+
+
+def test_progression_collapses_repeats_and_renders_one_picture(traced_run):
+    """The whole run as one scene, so "where was it going" has an answer.
+
+    A per-step picture answers "what did it do". Only the combined view shows
+    the trajectory, and it must not draw the same state twice: look, measure
+    and certify leave the world where it was, so consecutive identical scenes
+    are one state, not three.
+    """
+    from simagent.web.app import _combined_scene, _lanes
+
+    with make_client(traced_run) as client:
+        states = client.get("/api/trace/agent-demo/progression").json()
+        assert [s["tool"] for s in states] == ["look", "set_var"], states
+        png = client.get("/api/trace/agent-demo/progression.png")
+        assert png.status_code == 200 and png.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    steps = [
+        {"step": 1, "tool": "look", "scene": [{"type": "points", "coords": [[0, 0, 0]]}]},
+        {"step": 2, "tool": "measure", "scene": [{"type": "points", "coords": [[0, 0, 0]]}]},
+        {"step": 3, "mode": "imagine", "scene": [{"type": "points", "coords": [[9, 9, 9]]}]},
+        {"step": 4, "tool": "nudge", "scene": [{"type": "points", "coords": [[1, 0, 0]]}]},
+    ]
+    lanes = _lanes(steps)
+    assert [x["step"] for x in lanes] == [1, 4], "repeats collapse; imagined forks never happened"
+
+    combined = _combined_scene(lanes)
+    colors = {p["color"] for p in combined if p.get("type") == "points"}
+    assert len(colors) == 2, "each state gets its own colour, or time is unreadable"
+    assert combined[-1]["type"] == "label" and "pale = early" in combined[-1]["text"]

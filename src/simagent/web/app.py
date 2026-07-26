@@ -11,6 +11,7 @@ verdicts, it only displays kernel state.
 from __future__ import annotations
 
 import asyncio
+import colorsys
 import json
 import threading
 import uuid
@@ -37,6 +38,66 @@ _STATIC = Path(__file__).parent / "static"
 # NOT bundled: trust is by object identity with the bundled registry, so a Lean
 # stamp on one of these still says statement_review = spec-generated-review-needed.
 PROBLEMS_DIR = "problems"
+
+
+def _lanes(steps: list[dict]) -> list[dict]:
+    """One entry per state the configuration actually reached.
+
+    Imagined steps are forks that never happened, so they are excluded: a
+    progression must show the world's history, not the road not taken.
+    """
+    lanes: list[dict] = []
+    for s in steps:
+        if s.get("mode") in ("imagine", "annotation"):
+            continue
+        scene = s.get("scene")
+        if not scene:
+            continue
+        if lanes and lanes[-1]["scene"] == scene:
+            continue
+        lanes.append({"step": s.get("step"), "tool": s.get("tool"),
+                      "check": s.get("check"), "scene": scene})
+    return lanes
+
+
+def _lane_color(index: int, count: int) -> str:
+    """Time as one violet ramp: pale early, deep late.
+
+    Deliberately not blue and not red. Those two already mean HOLDS and FAILS
+    in every other picture this tool draws, and one colour cannot honestly
+    carry two meanings at once.
+    """
+    t = 1.0 if count < 2 else index / (count - 1)
+    r, g, b = colorsys.hls_to_rgb(276.0 / 360.0, (76.0 - 46.0 * t) / 100.0,
+                                  (32.0 + 30.0 * t) / 100.0)
+    return "#%02x%02x%02x" % (int(r * 255), int(g * 255), int(b * 255))
+
+
+def _combined_scene(lanes: list[dict]) -> list[dict]:
+    """Every state in one scene graph, recoloured by when it happened."""
+    combined: list[dict] = []
+    for index, lane in enumerate(lanes):
+        color = _lane_color(index, len(lanes))
+        last = index == len(lanes) - 1
+        fade = 1.0 if last else 0.3 + 0.4 * (index / len(lanes))
+        for prim in lane["scene"]:
+            if prim.get("type") == "label":
+                continue  # per-state labels would stack into noise
+            p = dict(prim)
+            if p.get("type") == "sphere":
+                continue  # one circumsphere per state buries everything else
+            if not last:
+                p["name"] = None  # the same name once per state is just overprint
+            p["color"] = color
+            if "opacity" in p:
+                p["opacity"] = float(p["opacity"]) * fade
+            elif not last:
+                p["opacity"] = fade
+            combined.append(p)
+    steps = ", ".join(f"[{lane['step']}] {lane['tool'] or '—'}" for lane in lanes)
+    combined.append({"type": "label",
+                     "text": f"{len(lanes)} states, pale = early, deep = late: {steps}"})
+    return combined
 
 
 def _disk_specs() -> dict[str, tuple[ProblemSpec, Path]]:
@@ -351,6 +412,42 @@ def create_app(
             cache.parent.mkdir(exist_ok=True)
             mpl.render_png(scene, cache, title=title)
         return FileResponse(cache)
+
+    @app.get("/api/trace/{run}/progression")
+    def trace_progression(run: str) -> list[dict]:
+        """The distinct configurations a run reached, in order.
+
+        A step that only looks or measures leaves the world where it was, and
+        drawing that state twice would stack identical geometry, so consecutive
+        identical scenes collapse to one entry.
+        """
+        return [
+            {"step": lane["step"], "tool": lane["tool"], "check": lane["check"]}
+            for lane in _lanes(read_trace(run_dir(run))["steps"])
+        ]
+
+    @app.get("/api/trace/{run}/progression.png")
+    def trace_progression_png(run: str):
+        """One picture of the whole run: every distinct state in a single scene.
+
+        Not cached: a live run reaches new states, so a cached file would go
+        stale in exactly the case where the picture is most interesting.
+        """
+        d = run_dir(run)
+        lanes = _lanes(read_trace(d)["steps"])
+        if len(lanes) < 2:
+            raise HTTPException(404, "this run reached fewer than two distinct states")
+        title = None
+        spec_file = d / "spec.json"
+        if spec_file.is_file():
+            try:
+                title = json.loads(spec_file.read_text()).get("title")
+            except (OSError, ValueError):
+                pass
+        out = d / "trace_renders" / "progression.png"
+        out.parent.mkdir(exist_ok=True)
+        mpl.render_png(_combined_scene(lanes), out, title=title)
+        return FileResponse(out)
 
     @app.get("/api/trace/{run}/file/{path:path}")
     def trace_file(run: str, path: str):

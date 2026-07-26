@@ -30,6 +30,7 @@ async function api(path, body) {
 const nb = {
   run: null,        // run currently displayed
   total: 0,         // highest step rendered
+  lanes: [],        // one entry per distinct configuration, for the combined view
   done: false,
   job: false,       // true when this page started the session (status endpoint exists)
   tracePoll: null,
@@ -46,7 +47,9 @@ function resetNotebook() {
   stopPolling();
   nb.run = null; nb.total = 0; nb.done = false; nb.job = false;
   nb.approach = null; nb.approachIdea = null; nb.finishSummary = null;
+  nb.lanes = [];
   $('cells').replaceChildren();
+  $('progressionWrap')?.remove(); // lives outside #cells, so clear it by hand
   $('statementWrap').style.display = 'none';
   $('verdictWrap').style.display = 'none';
   $('statusWrap').style.display = 'none';
@@ -250,9 +253,20 @@ function annotationCell(step) {
   return cell;
 }
 
+// Keep one lane per state the configuration actually reached. A run has many
+// steps that do not move anything (look, measure, view), and drawing those
+// again would stack identical geometry and make the progression unreadable.
+function recordLane(step) {
+  if (!Array.isArray(step.scene) || !step.scene.length) return;
+  const key = JSON.stringify(step.scene);
+  if (nb.lanes.length && nb.lanes[nb.lanes.length - 1].key === key) return;
+  nb.lanes.push({ step: step.step, tool: step.tool, check: step.check, key, scene: step.scene });
+}
+
 function appendStep(step) {
   if (step.mode === 'imagine') return imagineCell(step);
   if (step.mode === 'annotation') return annotationCell(step);
+  recordLane(step);
   const cell = el('article', 'cell');
   const gut = el('div', 'gut in', `In [${step.step}]:`);
   cell.appendChild(gut);
@@ -389,6 +403,7 @@ function showVerdict(tr, finishSummary) {
   v.classList.add(cls === 'bad' ? 'bad' : cls === 'none' ? 'none' : 'good');
   v.style.display = 'block';
   $('verdictWrap').style.display = 'block';
+  progressionCell();
 }
 
 function setStatus(text, logLines) {
@@ -787,27 +802,38 @@ function primitiveTarget(prim, extra = {}) {
 
 function buildOverlayScene(prims) {
   clearOverlayGroup();
+  return addScenePrims(prims, ov.group);
+}
+
+// `tint` replaces every primitive's own colour, which the combined view needs:
+// there, WHEN a state happened is the thing to read, and the semantic palette
+// (blue holds, red fails) would say the same thing about all of them at once.
+// The margin still carries that meaning, in the panel, as text.
+function addScenePrims(prims, parent, tint = null, fade = 1) {
   const labels = [];
+  const paint = (c) => (tint ?? c);
   for (const prim of prims) {
     if (prim.type === 'points') {
       prim.coords.forEach((p, index) => {
         const m = new THREE.Mesh(
           new THREE.SphereGeometry(prim.radius ?? 0.05, 18, 14),
-          new THREE.MeshBasicMaterial({ color: prim.color }),
+          new THREE.MeshBasicMaterial({ color: paint(prim.color), transparent: fade < 1, opacity: fade }),
         );
         m.position.copy(V(p));
         m.userData.commentTarget = primitiveTarget(prim, { index, coords: XYZ(p) });
-        ov.group.add(m);
+        parent.add(m);
       });
     } else if (prim.type === 'segments') {
       prim.pairs.forEach(([a, b], index) => {
         const g = new THREE.BufferGeometry().setFromPoints([V(a), V(b)]);
-        const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: prim.color }));
+        const line = new THREE.Line(g, new THREE.LineBasicMaterial({
+          color: paint(prim.color), transparent: fade < 1, opacity: fade,
+        }));
         line.userData.commentTarget = primitiveTarget(prim, {
           index,
           coords: [XYZ(a), XYZ(b)],
         });
-        ov.group.add(line);
+        parent.add(line);
       });
     } else if (prim.type === 'polygon' || prim.type === 'mesh') {
       const positions = [];
@@ -821,20 +847,20 @@ function buildOverlayScene(prims) {
       g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       g.computeVertexNormals();
       const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-        color: prim.color, transparent: true, opacity: prim.opacity ?? 0.3,
+        color: paint(prim.color), transparent: true, opacity: (prim.opacity ?? 0.3) * fade,
         side: THREE.DoubleSide, depthWrite: false,
       }));
       mesh.userData.commentTarget = primitiveTarget(prim, {
         coords: prim.type === 'polygon' ? prim.coords.map(XYZ) : undefined,
         vertices: prim.type === 'mesh' ? prim.vertices.map(XYZ) : undefined,
       });
-      ov.group.add(mesh);
+      parent.add(mesh);
     } else if (prim.type === 'sphere') {
       const m = new THREE.Mesh(
         new THREE.SphereGeometry(prim.radius, 40, 24),
         new THREE.MeshBasicMaterial({
-          color: prim.color, transparent: true,
-          opacity: Math.max(prim.opacity ?? 0.12, 0.06), depthWrite: false,
+          color: paint(prim.color), transparent: true,
+          opacity: Math.max(prim.opacity ?? 0.12, 0.06) * fade, depthWrite: false,
         }),
       );
       m.position.copy(V(prim.center));
@@ -842,7 +868,7 @@ function buildOverlayScene(prims) {
         center: XYZ(prim.center),
         radius: prim.radius,
       });
-      ov.group.add(m);
+      parent.add(m);
     } else if (prim.type === 'label') {
       labels.push(prim.text);
     }
@@ -888,6 +914,111 @@ function close3d() {
   ov.open = false;
   ov.step = null;
   $('overlay').style.display = 'none';
+  $('ovLanes').style.display = 'none';
+}
+
+// ------------------------------------------------- the progression overlay --
+// Every distinct configuration the run reached, in ONE scene. A per-step
+// picture answers "what did it do"; only the overlay answers "where was it
+// going", which is the question a reader actually has after forty cells.
+//
+// Colour carries TIME here, on a single violet ramp from pale (early) to deep
+// (late). It deliberately avoids blue and red: those two mean holds and fails
+// everywhere else in this tool, and a colour cannot honestly mean two things.
+function laneColor(index, count) {
+  const t = count < 2 ? 1 : index / (count - 1);
+  const light = 76 - 46 * t;          // pale early, deep late
+  const sat = 32 + 30 * t;
+  return `hsl(276, ${sat}%, ${light}%)`;
+}
+
+function openProgression() {
+  if (!nb.lanes.length) return;
+  try {
+    ensureOverlay();
+  } catch {
+    return; // no WebGL — the per-step PNGs are already on the page
+  }
+  clearOverlayGroup();
+  const panel = $('ovLanes');
+  panel.replaceChildren();
+  const head = el('div', 'lanehead');
+  head.appendChild(el('span', null, `${nb.lanes.length} states`));
+  const all = el('button', 'mini', 'all');
+  const none = el('button', 'mini', 'none');
+  head.append(all, none);
+  panel.appendChild(head);
+
+  const groups = [];
+  nb.lanes.forEach((lane, index) => {
+    const color = laneColor(index, nb.lanes.length);
+    const last = index === nb.lanes.length - 1;
+    const group = new THREE.Group();
+    // Earlier states step back so the latest one stays legible through them.
+    addScenePrims(lane.scene, group, color, last ? 1 : 0.28 + 0.4 * (index / nb.lanes.length));
+    ov.group.add(group);
+    groups.push(group);
+
+    const row = el('label', 'lanerow');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = true;
+    box.onchange = () => { group.visible = box.checked; };
+    const swatch = el('span', 'laneswatch');
+    swatch.style.background = color;
+    row.append(box, swatch, el('span', 'lanename', `[${lane.step}] ${lane.tool ?? '—'}`));
+    const m = lane.check?.margin;
+    if (m !== null && m !== undefined) {
+      row.appendChild(el('span', `lanemargin ${lane.check.holds ? 'good' : 'bad'}`,
+        `${m >= 0 ? '+' : ''}${Number(m).toFixed(3)}`));
+    }
+    panel.appendChild(row);
+  });
+  const setAll = (on) => {
+    groups.forEach((g) => { g.visible = on; });
+    panel.querySelectorAll('input[type=checkbox]').forEach((b) => { b.checked = on; });
+  };
+  all.onclick = () => setAll(true);
+  none.onclick = () => setAll(false);
+
+  ov.step = null; // a combined view has no single step to comment on
+  $('ovCap').textContent =
+    'every state the run reached · pale = early, deep = late · toggle any state on the left';
+  panel.style.display = 'block';
+  $('overlay').style.display = 'block';
+  ov.open = true;
+  sizeOverlay();
+  frameOverlay();
+  ov.startLoop();
+}
+
+// The last cell: the whole run as one picture. It appears when the run is
+// finished, because a progression is only complete once there is no next step.
+function progressionCell() {
+  if (nb.lanes.length < 2 || $('progressionWrap')) return;
+  const cell = el('section', 'cell');
+  cell.id = 'progressionWrap';
+  cell.appendChild(el('div', 'gut out', 'Out [all]:'));
+  const body = el('div', 'progbox');
+  // The picture first, without a click: the combined view is the answer to
+  // "where was it going", and hiding it behind a button hides the answer.
+  const img = el('img', 'sceneimg');
+  img.loading = 'lazy';
+  img.alt = 'every state the run reached, in one scene';
+  img.src = `/api/trace/${encodeURIComponent(nb.run)}/progression.png`;
+  img.title = 'click to open the interactive version, with a switch per state';
+  img.onclick = openProgression;
+  img.onerror = () => img.remove();
+  body.appendChild(img);
+  const open = el('button', null, `⧉ open all ${nb.lanes.length} states, with per-state switches`);
+  open.onclick = openProgression;
+  body.appendChild(open);
+  body.appendChild(el('div', 'note',
+    'Each cell above shows one moment. This draws every configuration the run '
+    + 'reached in a single 3D scene, pale for early and deep for late, with a '
+    + 'switch per state so you can isolate any of them. Colour means time here, '
+    + 'never holds or fails: the margin next to each state carries that.'));
+  $('cells').after(cell);
 }
 
 $('ovCenter').onclick = frameOverlay;

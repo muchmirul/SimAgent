@@ -117,11 +117,17 @@ The agent's senses and hands, beyond looking and moving points:
    - the **equations** the harness wrote down for that state (amber box)
    - a **diff**: which points moved (`- before` / `+ after`) and the margin change
    - a **HOLDS / FAILS** badge with the margin (margin > 0 ⇔ the property holds)
-7. To steer the run, select text or double-click a cell, thought, action, or
+7. When the run ends, a final **Out [all]** cell draws every state the run
+   reached in **one** picture: pale for early, deep for late. A single cell
+   answers "what did it do"; only this one answers "where was it going". Click
+   it for the interactive version, which lists each state with a switch, so you
+   can isolate any one of them or compare two. Colour means time there, never
+   holds or fails: the margin printed beside each state carries that.
+8. To steer the run, select text or double-click a cell, thought, action, or
    equation line. In 3D, click a point or primitive. Send a comment for the
    next pi turn, or choose **branch with comment** to rewind and continue from
    that exact state. Comments are visible narrative, never proof material.
-8. The final **verdict cell** comes only from the kernel (`proof.json`):
+9. The final **verdict cell** comes only from the kernel (`proof.json`):
    *method: verified by sandbox+lean* means exact arithmetic plus a Lean
    kernel certificate. If nothing was certified, it says so. The agent's
    prose never upgrades a claim.
