@@ -40,8 +40,16 @@ node agent/dist/cli.js auth-check \
 Start the notebook for each working session:
 
 ```bash
-.venv/bin/simagent web
+./start.sh          # or: .venv/bin/simagent web
 ```
+
+`start.sh` is the one-command version. It kills any server still running from
+an earlier session, rebuilds the pi runtime if `agent/src` changed, warns when
+pi has no authenticated provider, and opens the browser with the problem,
+thinking level and turn limit already filled in. Change them from the
+environment: `PROBLEM=circumcenter-in-triangle THINKING=high TURNS=60
+./start.sh`, and `MODEL=provider/model` to pin a model instead of letting pi
+route one.
 
 Your browser opens the **reasoning notebook** at **http://127.0.0.1:8642**.
 If it does not open, enter that address manually. If the port is busy, use

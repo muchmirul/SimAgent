@@ -24,6 +24,14 @@ Check the install:
 .venv/bin/simagent list
 ```
 
+If you only want the notebook open and ready, `./start.sh` from the repo root
+does the whole thing in one command: it kills any stale server, rebuilds the pi
+runtime when `agent/src` has changed, warns if pi has no authenticated provider,
+then opens the browser on a page with the problem, thinking level and turn limit
+already set. Override any of them from the environment, for example
+`PROBLEM=circumcenter-in-triangle THINKING=high ./start.sh`. The rest of this
+page is the same thing done by hand, which is worth reading once.
+
 You should see eleven bundled problems:
 
 ```

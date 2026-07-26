@@ -669,6 +669,20 @@ async function init() {
   }
   const problem = params.get('problem');
   if (problem) psel.value = problem;
+  // Preset the run controls from the URL so one script can open a fully
+  // configured notebook. A model that is not authenticated is left unset
+  // rather than forced, so the run falls back to pi's own routing.
+  const model = params.get('model');
+  if (model) {
+    const match = [...modelSel.options].find((o) => o.textContent === model);
+    if (match) modelSel.value = match.value;
+  }
+  const thinking = params.get('thinking');
+  if (thinking && [...$('thinkingSel').options].some((o) => o.value === thinking)) {
+    $('thinkingSel').value = thinking;
+  }
+  const turns = params.get('turns');
+  if (turns && Number(turns) > 0) $('maxTurns').value = turns;
 }
 
 $('btnRun').onclick = () => startAgent();
