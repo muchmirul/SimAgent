@@ -863,17 +863,24 @@ function open3d(step) {
   $('overlay').style.display = 'block';
   ov.open = true;
   sizeOverlay();
-  // fit camera to content
-  const box = new THREE.Box3().setFromObject(ov.group);
-  if (!box.isEmpty()) {
-    const center = box.getCenter(new THREE.Vector3());
-    const span = Math.max(box.getSize(new THREE.Vector3()).length(), 1e-3);
-    ov.controls.target.copy(center);
-    const dir = ov.camera.position.clone().sub(center).normalize();
-    if (!dir.lengthSq()) dir.set(1, 1, 1).normalize();
-    ov.camera.position.copy(center.clone().add(dir.multiplyScalar(span * 1.15)));
-  }
+  frameOverlay();
   ov.startLoop();
+}
+
+// Put the content back in the middle of the frame, keeping the direction you
+// are looking from. Orbiting is cheap to undo; getting lost is not, and losing
+// the object off-screen is the one way to get stuck in a 3D view.
+function frameOverlay() {
+  if (!ov) return;
+  const box = new THREE.Box3().setFromObject(ov.group);
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const span = Math.max(box.getSize(new THREE.Vector3()).length(), 1e-3);
+  ov.controls.target.copy(center);
+  const dir = ov.camera.position.clone().sub(center).normalize();
+  if (!dir.lengthSq()) dir.set(1, 1, 1).normalize();
+  ov.camera.position.copy(center.clone().add(dir.multiplyScalar(span * 1.15)));
+  ov.controls.update();
 }
 
 function close3d() {
@@ -883,6 +890,7 @@ function close3d() {
   $('overlay').style.display = 'none';
 }
 
+$('ovCenter').onclick = frameOverlay;
 $('ovClose').onclick = close3d;
 $('overlay').addEventListener('click', (e) => { if (e.target === $('overlay')) close3d(); });
 window.addEventListener('keydown', (e) => {

@@ -134,6 +134,7 @@
   #overlay .frame { position: absolute; inset: 28px; border: 1px solid var(--border);
     border-radius: 10px; overflow: hidden; background: var(--bg); }
   #ovClose { position: absolute; top: 38px; right: 40px; z-index: 51; }
+  #ovCenter { position: absolute; top: 38px; right: 132px; z-index: 51; }
   #ovCap { position: absolute; left: 0; right: 0; bottom: 38px; text-align: center;
     color: var(--dim); font-size: 13px; pointer-events: none; }
   #ovHint { position: absolute; top: 38px; left: 44px; color: var(--dim); font-size: 12px;
@@ -274,6 +275,7 @@
 
 <div id="overlay">
   <div class="frame" id="ovFrame"></div>
+  <button id="ovCenter" title="put the scene back in the middle, keeping your viewing angle">⌖ center</button>
   <button id="ovClose">close ✕</button>
   <div id="ovHint">orbit: drag · zoom: scroll · click a point or primitive to comment</div>
   <div id="ovCap"></div>

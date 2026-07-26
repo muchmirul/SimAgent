@@ -17,12 +17,34 @@ from ..sandbox import scene as scene_mod  # noqa: E402
 
 _BG = "#ffffff"
 _FG = "#1c1e21"
+_GRID = "#dde1e6"
+_GRID_AXIS = "#c2c8d0"
+
+
+def _reference_grid(ax, lo: float, hi: float, divisions: int = 12) -> None:
+    """The xy-plane, drawn as lines, matching the browser's 3D view.
+
+    The preview turns the axes off, which is right (ticks on a configuration
+    space mean little), but it left the scene floating with no sense of scale
+    or orientation. This is the same grid three.js draws, so the picture in the
+    cell and the picture you get by clicking it agree.
+    """
+    z = 0.0 if lo <= 0.0 <= hi else lo
+    ticks = np.linspace(lo, hi, divisions + 1)
+    lines, colors = [], []
+    for t in ticks:
+        on_axis = abs(t) < 1e-12
+        lines.append([(t, lo, z), (t, hi, z)])
+        lines.append([(lo, t, z), (hi, t, z)])
+        colors += [_GRID_AXIS if on_axis else _GRID] * 2
+    ax.add_collection3d(Line3DCollection(lines, colors=colors, linewidths=0.6, zorder=0))
 
 
 def render_png(scene: list[dict], path, title: str | None = None) -> str:
     fig = plt.figure(figsize=(7, 5.2), facecolor=_BG)
     ax = fig.add_subplot(111, projection="3d")
     ax.set_facecolor(_BG)
+    _reference_grid(ax, *scene_mod.bounds(scene))
 
     labels: list[str] = []
     for prim in scene:
