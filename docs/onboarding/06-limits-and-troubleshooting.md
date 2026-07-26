@@ -117,6 +117,29 @@ node agent/dist/cli.js auth-check --provider <provider> --model <model>
 Node 22.19 or newer is required. Note that only one controlled pi run is allowed
 at a time.
 
+### The run fails naming a function that does not exist
+
+A message like `session failed: AttributeError: module 'simagent.agent' has no
+attribute 'run'` usually means the server is old, not that the code is broken.
+Python loads a module once when the process starts, so a `simagent web` left
+running for days keeps executing the code as it was that day. Editing a file
+changes nothing until you restart.
+
+```bash
+pkill -f "simagent web"
+.venv/bin/simagent web
+```
+
+Check the age of the process before you go hunting for the function:
+
+```bash
+ps -eo pid,etime,cmd | grep "simagent web" | grep -v grep
+```
+
+The rule: restart the notebook after any Python change. It does not hot reload.
+Also read the terminal running the server, since the browser shows only the last
+line of the error while the full traceback stays in the terminal.
+
 ### Typing a conjecture in plain words fails
 
 That path calls Claude to formalize the sentence, so it needs
