@@ -21,10 +21,22 @@ roadmap), list.md (the ranked work list), agent/README.md (the pi package on
 its own terms).
 
 **Four standards bind every change. Read ARCHITECTURE.md for all four before
-you build anything** ("Scope: which mathematics this harness serves",
-contributor rule 7, "Which model runs it: any model pi routes", and "Every
-output explains itself").
+you build anything** ("The harness answers nothing", "Scope: which mathematics
+this harness serves", "Which model runs it: any model pi routes", and "Every
+output explains itself"). The first one governs the rest.
 
+- **The harness answers nothing.** SimAgent is only a harness, and every
+  answer comes from the model pi routes. The harness may be powerful — it
+  samples, anneals, enumerates, certifies, generates Lean and draws — because
+  all of that is EXECUTION. It owes capability, perception, verification and
+  memory; the model owes which claim to attack, which configuration to try,
+  which of the ten methods, what the picture means and what to conclude. So: no
+  mathematical thinking lives in this repository, no hints in tool
+  descriptions, no worked solutions in spec notes; an instrument reports its
+  own limits but never the next move; prose is never a verdict whoever wrote
+  it. This binds whoever edits the repo too, human or coding agent: build
+  instruments, do not solve the user's mathematics inside the harness, because
+  shipping insight as code is how a harness turns into an answer key.
 - **Scope.** SimAgent serves one machine: a finite-dimensional configuration
   space, a scalar margin whose sign decides the claim, a picture of it, and
   exact arithmetic. A claim is admissible only if it passes all four parts of
@@ -33,10 +45,6 @@ output explains itself").
   geometry, combinatorics and graph theory need a new Space; analysis,
   topology, abstract algebra, set theory, logic and cryptography are out
   permanently. Work aimed at an out-of-scope domain is rejected on scope.
-- **Harness only.** Does this give the model something it cannot get by
-  thinking? Capability, perception, verification and memory are ours; strategy,
-  insight and the choice of proof method are the model's. An instrument reports
-  its own limits but never names the next method to try.
 - **Every output explains itself.** A stamp is a word and a witness is a list
   of fractions; neither tells a reader what happened. Every result and every
   state in a progression carries plain English saying what was found, what

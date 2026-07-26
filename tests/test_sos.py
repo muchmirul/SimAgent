@@ -296,3 +296,54 @@ def test_a_junk_assumption_is_rejected():
     assert any("assumption rejected" in e for e in validate_claim(bad))
     unknown = dataclasses.replace(claim, assume=["Z[0]"])
     assert any("unknown entities" in e for e in validate_claim(unknown))
+
+
+def test_no_surface_the_model_reads_tells_it_what_to_do():
+    """SimAgent is only a harness: every answer comes from the routed model.
+
+    The model reads three things this repository controls: the system prompt,
+    the tool descriptions, and the notes an instrument appends when it fails.
+    A hint in any of them is the harness doing the model's thinking, and it is
+    the easiest rule in the project to break by accident, because a helpful
+    sentence looks like good documentation right up until it decides the
+    method for whoever reads it.
+    """
+    from simagent.agent import SYSTEM, TOOLS
+
+    # Imperatives that hand the model a decision rather than a fact.
+    steering = (
+        "you should", "we recommend", "try instead", "instead try",
+        "the trick is", "the answer is", "hint:", "next, try", "best approach",
+        "you must prove", "the right method",
+    )
+    surfaces = [("SYSTEM prompt", SYSTEM)]
+    for tool in TOOLS:
+        surfaces.append((f"tool {tool['name']}", tool.get("description", "")))
+        for field, spec in (tool.get("input_schema", {}).get("properties") or {}).items():
+            surfaces.append((f"tool {tool['name']}.{field}", str(spec.get("description", ""))))
+
+    for where, text in surfaces:
+        lowered = (text or "").lower()
+        for phrase in steering:
+            assert phrase not in lowered, f"harness is steering in {where}: {phrase!r}"
+
+
+def test_the_explanation_describes_and_never_advises():
+    """explain.py restates what the kernel found. The moment it suggests a next
+    move it stops being perception and starts being strategy."""
+    from simagent import explain
+
+    texts = list(explain.STAMP_WORDS.values()) + list(explain.VERDICT_WORDS.values())
+    texts.append(explain.result_summary({"verified_by": "none"}, {"verdict": "no_counterexample"}))
+    texts.append(explain.result_summary({"verified_by": "sandbox"}, None))
+    texts.append(explain.step_line(
+        {"tool": "refine", "check": {"margin": -1.0},
+         "diff": {"changed": [{"var": "T", "row": 0}]}},
+        {"tool": "look", "check": {"margin": 2.0}},
+    ))
+    for r in explain.result_rows(None, {"verified_by": "none"}, None, {"margin": -1.0}):
+        texts.append(r["why"])
+    for text in texts:
+        lowered = text.lower()
+        for phrase in ("you should", "try ", "we recommend", "next step", "consider "):
+            assert phrase not in lowered, f"explanation is advising: {text!r}"

@@ -14,9 +14,13 @@ is a harness built on that idea:
 > honest evidence — written up in LaTeX and sketched in Lean. Equations are the
 > *representation* of what happened in the sandbox, not the medium of work.
 
-SimAgent is a small, correctness-first **agent harness**: the LLM (or you)
-reasons; the harness only records what it can *execute or check*; the Lean
-kernel is the sole authority on deduction. Three pillars: **Python** computes,
+SimAgent is a small, correctness-first **agent harness**, and the word harness
+is the whole design: **it answers nothing.** Every answer comes from the model
+pi routes. The harness samples, anneals, enumerates, certifies in exact
+fractions, generates Lean and draws the configuration, because all of that is
+execution. Which claim to attack, which configuration to try, which of the ten
+methods and what the picture means belong to the model. The Lean kernel is the
+sole authority on deduction. Three pillars: **Python** computes,
 **Lean** formulates and verifies, **Manim** visualizes. See
 [ARCHITECTURE.md](ARCHITECTURE.md).
 

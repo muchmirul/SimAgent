@@ -105,6 +105,49 @@ geometry is where such questions are still open.
 Olympiad inequalities are the benchmark that earns credibility, not the
 destination.
 
+## The harness answers nothing
+
+**SimAgent is only a harness. It does not answer the question. Every answer
+comes from the model pi routes.** This is the first standard, not the fourth,
+and everything else here is downstream of it.
+
+The split is not "the harness is dumb". The harness is allowed to be powerful,
+and it is: it samples, anneals, enumerates every case of a finite domain,
+rationalizes a witness, certifies in exact arithmetic, generates a Lean
+certificate and draws the configuration. All of that is EXECUTION. None of it
+is reasoning, and the difference is what this section fixes.
+
+| the harness owes | the model owes |
+|---|---|
+| capability (act on the world), perception (see it), verification (settle it mechanically), memory (replay it) | which claim to attack, which configuration to try, which of the ten methods, what the picture means, what to conclude |
+
+The rules that follow, each of which has bitten or nearly bitten:
+
+1. **No mathematical thinking lives in this repository.** No hardcoded answers,
+   no hints in a tool description, no "the trick is to flatten it" in a spec's
+   notes. A bundled claim documents its ground truth because it is a
+   known-answer TEST of the machine, not a worked solution for the model.
+2. **An instrument reports its own limits, and never the next move.** "No
+   certificate found; the Gram matrix was not PSD" is information the model
+   needs. "Try induction instead" is the model's decision, taken from it. Both
+   `sos.find_sos` and `proof.sos_proof` append reasons to `notes` for exactly
+   this reason.
+3. **A mechanical check is not an answer to the question.** `run_search`
+   finding a counterexample is the harness executing, and the WITNESS is a
+   fact. That the conjecture was worth attacking that way, and what it means,
+   is the model's.
+4. **Prose never becomes a verdict**, whoever wrote it: the model's narrative,
+   the user's comment, a contributor's docstring. Only `proof.py` stamps, and
+   `explain.py` may restate that stamp but never raise it.
+5. **Whoever edits this repository is bound by the same rule.** A human or a
+   coding agent working on SimAgent builds instruments; it does not solve the
+   user's mathematics inside the harness. If a problem needs insight, that is
+   the routed model's job, and shipping the insight as code is how a harness
+   quietly turns into an answer key.
+
+Pinned by `test_harness_never_picks_the_method_for_the_model` and
+`test_no_surface_the_model_reads_tells_it_what_to_do`.
+
 ## Which model runs it: any model pi routes
 
 SimAgent harnesses whatever model pi selects. There is no blessed provider and
