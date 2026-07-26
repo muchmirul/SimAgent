@@ -649,7 +649,9 @@ async function init() {
   for (const p of problems) {
     const o = document.createElement('option');
     o.value = p.id;
-    o.textContent = `${p.title} [${p.quantifier}]`;
+    // Mark your own files, because their Lean stamp carries a review flag a
+    // bundled problem does not.
+    o.textContent = `${p.title} [${p.quantifier}]${p.source === 'file' ? '  (from problems/)' : ''}`;
     psel.appendChild(o);
   }
   const models = await api('/api/agent/models').catch(() => []);

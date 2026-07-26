@@ -189,3 +189,44 @@ def test_agent_run_stop_blocks_tools_but_allows_finish(tmp_path):
     assert not err2
     run.finalize()
     assert run.summary == "s"
+
+
+def test_a_problem_file_joins_the_dropdown_and_starts_by_path(tmp_path, monkeypatch):
+    """Your own claim in ./problems must be runnable from the notebook.
+
+    A question that cannot get into the tool is one the tool cannot help with,
+    so the dropdown is not limited to the bundled eleven. The runtime takes a
+    disk claim as a PATH, never as a bundled id, which is what keeps
+    `library.is_bundled` (and therefore the review flag) honest.
+    """
+    from simagent.library import get as get_bundled
+
+    problems = tmp_path / "problems"
+    problems.mkdir()
+    spec = get_bundled("positive-quadratic")
+    payload = spec.to_json()
+    payload["id"] = "my-own-claim"
+    payload["title"] = "a claim of my own"
+    (problems / "mine.json").write_text(__import__("json").dumps(payload))
+    (problems / "broken.json").write_text("{not json")
+    monkeypatch.chdir(tmp_path)
+
+    control = FakePiControl()
+    with make_client(tmp_path, agent_client=control) as client:
+        rows = client.get("/api/problems").json()
+        mine = [r for r in rows if r["id"] == "my-own-claim"]
+        assert mine and mine[0]["source"] == "file", "the file must appear, marked as yours"
+        assert all(r["id"] != "broken" for r in rows), "a broken file is skipped, not fatal"
+
+        started = client.post(
+            "/api/agent/start",
+            json={"problem_id": "my-own-claim", "max_turns": 3},
+        )
+        assert started.status_code == 200
+        kwargs = control.calls[0][1]
+        assert kwargs["problem_id"] is None, "a disk claim is never passed as a bundled id"
+        assert str(kwargs["spec_path"]).endswith("problems/mine.json")
+
+        assert client.post(
+            "/api/agent/start", json={"problem_id": "no-such-claim"}
+        ).status_code == 404

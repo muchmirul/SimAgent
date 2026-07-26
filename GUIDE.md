@@ -132,7 +132,21 @@ tools and no file access. Python remains the authority for state changes and
 verdicts, so the model's choice changes how well the run goes, never what the
 run is allowed to claim.
 
-## 4. Type your own problem
+## 4. Run your own problem
+
+Drop a `claim/1` spec file in `problems/` and it appears in the dropdown,
+marked `(from problems/)`. Refresh the page and pick it like any other problem.
+`problems/README.md` explains the fields, and `problems/three-xy.json` is a
+working example to copy.
+
+That path needs no Claude access, because you wrote the claim yourself instead
+of asking a model to write it. The stamp differs though: a file here is not
+bundled, so a Lean-checked result says `statement_review =
+spec-generated-review-needed`. The arithmetic is kernel checked either way, but
+for your own file a human still has to confirm the Lean theorem says what you
+meant.
+
+## 5. Type your own problem in plain words
 
 Type the problem in the SimAgent browser text box, not in the normal pi
 terminal. For example:
@@ -153,7 +167,7 @@ loop against the registries, and it needs `ANTHROPIC_API_KEY` or an
 problem: those are already formalized, so stage 1 is skipped entirely and any
 pi model can run them.
 
-## 5. Replay past runs
+## 6. Replay past runs
 
 The header dropdown lists every recorded run, including web-started and
 CLI-started runs. Pick one to read the notebook; if its trace is still being
@@ -166,7 +180,7 @@ restore control of an old pi session. A separately launched CLI session can be
 viewed in the browser, but it is owned by a different controller and cannot be
 steered there.
 
-## 6. Without the browser
+## 7. Without the browser
 
 ```bash
 .venv/bin/simagent list                              # see the problems
@@ -195,7 +209,7 @@ writes `trace.jsonl`, the reasoning trace the notebook replays. Manim stills and
 videos render via `simagent solve --render-manim` (see README for the no-sudo
 Manim env).
 
-## 7. Reading the verdicts honestly
+## 8. Reading the verdicts honestly
 
 - **CERTIFIED counterexample**: proved false. Done.
 - **numeric candidate**: looks false, but exact check did not confirm. Not proof.

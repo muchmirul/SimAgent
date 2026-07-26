@@ -32,6 +32,29 @@ from .session import SandboxSession
 
 _STATIC = Path(__file__).parent / "static"
 
+# Your own problems, so the notebook is not limited to the bundled eleven.
+# Drop a claim/1 spec.json in ./problems and it joins the dropdown. These are
+# NOT bundled: trust is by object identity with the bundled registry, so a Lean
+# stamp on one of these still says statement_review = spec-generated-review-needed.
+PROBLEMS_DIR = "problems"
+
+
+def _disk_specs() -> dict[str, tuple[ProblemSpec, Path]]:
+    """Spec files in ./problems, keyed by id. A broken file is skipped with a
+    printed reason: silence would look like the file was never there."""
+    found: dict[str, tuple[ProblemSpec, Path]] = {}
+    root = Path(PROBLEMS_DIR)
+    if not root.is_dir():
+        return found
+    for path in sorted(root.glob("*.json")):
+        try:
+            spec = ProblemSpec.load(path)
+        except Exception as exc:  # a user-authored file, so say what is wrong
+            print(f"problems/{path.name}: skipped ({exc})")
+            continue
+        found[spec.id] = (spec, path)
+    return found
+
 
 class LoadBody(BaseModel):
     problem_id: str | None = None
@@ -123,15 +146,27 @@ def create_app(
 
     @app.get("/api/problems")
     def problems() -> list[dict]:
-        return [
+        rows = [
             {
                 "id": s.id,
                 "title": s.title,
                 "quantifier": s.quantifier,
                 "conjecture": s.conjecture,
+                "source": "bundled",
             }
             for s in all_specs()
         ]
+        rows += [
+            {
+                "id": spec.id,
+                "title": spec.title,
+                "quantifier": spec.quantifier,
+                "conjecture": spec.conjecture,
+                "source": "file",
+            }
+            for spec, _ in _disk_specs().values()
+        ]
+        return rows
 
     @app.post("/api/load")
     def load(body: LoadBody) -> dict:
@@ -366,11 +401,18 @@ def create_app(
         if bool(body.problem_id) == bool(conjecture):
             raise HTTPException(422, "give exactly one of problem_id or conjecture")
         spec_path = None
-        if body.problem_id:
+        problem_id = body.problem_id
+        if problem_id:
             try:
-                get(body.problem_id)
+                get(problem_id)
             except KeyError as exc:
-                raise HTTPException(404, str(exc)) from exc
+                # Not bundled: it may be one of the user's own files, which the
+                # runtime takes as a path rather than an id.
+                on_disk = _disk_specs().get(problem_id)
+                if on_disk is None:
+                    raise HTTPException(404, str(exc)) from exc
+                spec_path = on_disk[1].resolve()
+                problem_id = None
         else:
             from ..llm import formalize
 
@@ -381,7 +423,7 @@ def create_app(
             spec.save(spec_path)
         try:
             return control().start(
-                problem_id=body.problem_id,
+                problem_id=problem_id,
                 spec_path=spec_path,
                 provider=body.provider,
                 model=body.model,
