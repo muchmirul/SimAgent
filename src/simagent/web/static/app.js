@@ -408,6 +408,21 @@ function showVerdict(tr, finishSummary) {
         : est === nb.approach ? `declared and established: ${est}`
         : `declared: ${nb.approach} → established: ${est}`));
   }
+  // What it MEANS, in plain English, built by the kernel side from proof.json.
+  // A stamp and a list of fractions is not an answer a person can read.
+  if (tr.explain?.length) {
+    const box = el('div', 'explain');
+    box.appendChild(el('div', 'explainhead', 'What this means'));
+    for (const row of tr.explain) {
+      const r = el('div', 'explainrow');
+      r.appendChild(el('span', 'exlabel', row.label));
+      r.appendChild(el('span', 'exvalue mono', String(row.value)));
+      r.appendChild(el('span', 'exwhy', row.why));
+      box.appendChild(r);
+    }
+    if (tr.explain_summary) box.appendChild(el('div', 'exsummary', tr.explain_summary));
+    v.appendChild(box);
+  }
   v.classList.add(cls === 'bad' ? 'bad' : cls === 'none' ? 'none' : 'good');
   v.style.display = 'block';
   $('verdictWrap').style.display = 'block';
@@ -1044,6 +1059,18 @@ function progressionCell() {
       + 'reached in a single 3D scene, pale for early and deep for late, with a '
       + 'switch per state so you can isolate any of them. Colour means time here, '
       + 'never holds or fails: the margin next to each state carries that.'));
+  // One line per state saying what actually happened. The picture shows the
+  // shapes; only this says which move caused which change in the margin.
+  const list = el('div', 'statelist');
+  api(`/api/trace/${encodeURIComponent(nb.run)}/progression`).then((states) => {
+    for (const s of states) {
+      const row = el('div', 'staterow');
+      row.appendChild(el('span', 'statestep mono', `[${s.step}]`));
+      row.appendChild(el('span', 'statewhy', s.why ?? ''));
+      list.appendChild(row);
+    }
+  }).catch(() => { /* the picture still stands on its own */ });
+  body.appendChild(list);
   cell.appendChild(body);
   $('cells').after(cell);
 }

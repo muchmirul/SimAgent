@@ -20,9 +20,10 @@ there before this file), GUIDE.md (how to use the tool), plan.md (the P0-P7
 roadmap), list.md (the ranked work list), agent/README.md (the pi package on
 its own terms).
 
-**Three standards bind every change. Read ARCHITECTURE.md for all three before
+**Four standards bind every change. Read ARCHITECTURE.md for all four before
 you build anything** ("Scope: which mathematics this harness serves",
-contributor rule 7, and "Which model runs it: any model pi routes").
+contributor rule 7, "Which model runs it: any model pi routes", and "Every
+output explains itself").
 
 - **Scope.** SimAgent serves one machine: a finite-dimensional configuration
   space, a scalar margin whose sign decides the claim, a picture of it, and
@@ -36,6 +37,13 @@ contributor rule 7, and "Which model runs it: any model pi routes").
   thinking? Capability, perception, verification and memory are ours; strategy,
   insight and the choice of proof method are the model's. An instrument reports
   its own limits but never names the next method to try.
+- **Every output explains itself.** A stamp is a word and a witness is a list
+  of fractions; neither tells a reader what happened. Every result and every
+  state in a progression carries plain English saying what was found, what
+  checked it, and whether it is an answer or only evidence. `explain.py` writes
+  them for both `answer.md` and the notebook, from kernel state only, and it
+  RESTATES the stamp rather than raising it: explaining a `verified_by: none`
+  result says in words that nothing checked it.
 - **Any model pi routes.** SimAgent harnesses whatever model pi selects; there
   is no blessed provider, and a coding model driving a run is normal. With no
   `--provider/--model` the runtime takes the first authenticated VISION model
@@ -172,6 +180,11 @@ Each module is described once, here. State it nowhere else.
   → answer) into a self-describing directory: spec.json, report.json,
   preview.png, scene.json, scene_manim.py, answer.md, answer.tex,
   conjecture.lean, optional proof_sketch.md and media/.
+- `explain.py` turns kernel state into plain English: `result_rows()` and
+  `result_summary()` for the end of a run, `step_line()` for one state of a
+  progression. Reads Proof/SearchReport objects or the JSON they were saved
+  as, so `answer.md` and the notebook say the same thing. Never mints or
+  upgrades a verdict.
 - `answer.py` writes answer.md / answer.tex / conjecture.lean. Verdict wording
   is deliberate: certified vs numeric-candidate vs evidence. Never upgrade the
   claim.

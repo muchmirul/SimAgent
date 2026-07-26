@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from . import explain
 from .search import SearchReport
 from .spec import ProblemSpec
 
@@ -150,6 +151,13 @@ def write_markdown(spec: ProblemSpec, report: SearchReport, path: Path, proof=No
         lines += [f"Witness check: holds={check.get('holds')} margin={check.get('margin')}", ""]
         if check.get("data"):
             lines += ["```json", str(check["data"]), "```", ""]
+    # In plain English, before the method section: a reader must not have to
+    # reconstruct what happened from a stamp and a list of fractions.
+    rows = explain.result_rows(spec, proof, report, check)
+    if rows:
+        lines += ["## What this means", "", "| | | |", "|---|---|---|"]
+        lines += [f"| {r['label']} | {r['value']} | {r['why']} |" for r in rows]
+        lines += ["", explain.result_summary(proof, report), ""]
     lines += [
         "## Method",
         "",

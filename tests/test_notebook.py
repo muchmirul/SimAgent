@@ -283,3 +283,31 @@ def test_a_cached_render_is_redrawn_when_the_renderer_changes(traced_run, monkey
         monkeypatch.setattr(web_app, "_RENDERER_MTIME", cache.stat().st_mtime + 60)
         assert client.get("/api/trace/agent-demo/render/2").status_code == 200
         assert cache.stat().st_mtime_ns != stamp, "a newer renderer must redraw"
+
+
+def test_the_result_and_every_state_explain_themselves(traced_run):
+    """A stamp and a list of fractions is not an answer a person can read.
+
+    The explanation is built from kernel state only, so it restates what
+    proof.py decided and can never raise it. That is the whole reason it is
+    allowed to exist: describing a verdict is perception, minting one is not.
+    """
+    from simagent import explain
+
+    with make_client(traced_run) as client:
+        tr = client.get("/api/trace/agent-demo").json()
+        labels = [r["label"] for r in tr["explain"]]
+        assert "Verified by" in labels, "the reader must be told what checked this"
+        assert any(l.startswith("Margin") for l in labels), "and what the deciding number was"
+        assert tr["explain_summary"], "and whether it is an answer or only evidence"
+
+        states = client.get("/api/trace/agent-demo/progression").json()
+        assert all(s["why"] for s in states), "every state says what happened"
+        assert "starting configuration" in states[0]["why"]
+        moved = [s for s in states if "moved" in s["why"]]
+        assert moved, "a state that changed the world must name what moved"
+
+    # The rule that makes this safe: it reports the stamp, it never raises it.
+    rows = explain.result_rows(None, {"verified_by": "none"}, None, {"margin": -1.0})
+    assert any(r["value"] == "none" for r in rows)
+    assert "Not a proof" in " ".join(r["why"] for r in rows)

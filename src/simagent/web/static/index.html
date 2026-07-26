@@ -157,6 +157,23 @@
   .lanemargin.bad { color: var(--bad); }
   .progbox { border-left: 3px solid #7b3fa0; background: var(--panel);
     border-radius: 0 8px 8px 0; padding: 12px 14px; }
+
+  /* what actually happened, per state and for the result as a whole */
+  .statelist { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .staterow { display: flex; gap: 8px; align-items: baseline; padding: 3px 0;
+    font-size: 12.5px; }
+  .statestep { color: var(--out); flex: none; }
+  .statewhy { color: var(--fg); }
+  .explain { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .explainhead { font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--dim); margin-bottom: 6px; }
+  .explainrow { display: grid; grid-template-columns: 150px minmax(0,1fr) minmax(0,1.4fr);
+    gap: 10px; padding: 3px 0; font-size: 12.5px; align-items: baseline; }
+  .explainrow .exlabel { color: var(--dim); }
+  .explainrow .exvalue { overflow-wrap: anywhere; }
+  .explainrow .exwhy { color: var(--dim); }
+  .exsummary { margin-top: 8px; font-size: 13px; }
+  @media (max-width: 720px) { .explainrow { grid-template-columns: 1fr; gap: 2px; } }
   #ovCap { position: absolute; left: 0; right: 0; bottom: 38px; text-align: center;
     color: var(--dim); font-size: 13px; pointer-events: none; }
   #ovHint { position: absolute; top: 38px; left: 44px; color: var(--dim); font-size: 12px;

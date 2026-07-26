@@ -130,6 +130,31 @@ the journal is about the world.
 The rule that follows: any claim about agent behaviour must name the model, or
 it is not a claim about anything.
 
+## Every output explains itself (`explain.py`)
+
+A stamp is a word and a witness is a list of fractions. Neither tells a reader
+what happened, and asking them to reconstruct it is asking them to do the
+harness's job: perception is calibrated compression, and a number without its
+meaning is only shortened, not compressed.
+
+So a result and every state in a progression carry an explanation in plain
+English, and it is a STANDARD, not a nicety. `explain.py` writes them, and the
+same module serves `answer.md` and the notebook, because two wordings of one
+verdict would be two claims.
+
+- **A result** gets fact rows (what was found, what verified it, the witness in
+  exact fractions, each derived value, the margin) and one closing sentence
+  that says whether this is an answer or only evidence.
+- **A state** gets one line: which variables moved, what the margin did, and
+  whether this is the state that crossed zero.
+
+Both are built from kernel state only: `proof.json`, the search report, and the
+check the sandbox recorded per step. `explain.py` reads no model prose and
+decides nothing. It restates the stamp `proof.py` assigned and **cannot raise
+it**: an explanation of a `verified_by: none` result says, in words, that
+nothing checked it. `test_the_result_and_every_state_explain_themselves` pins
+that.
+
 ## The proof kernel (`proof.py`)
 
 Every answer names one of the ten classical proof methods and carries a

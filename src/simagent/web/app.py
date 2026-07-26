@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from ..library import all_specs, get
 from ..spec import ProblemSpec
+from .. import explain
 from ..core.journal import TRACE_FILE, read_trace
 from ..sandbox import scene as scene_mod
 from ..visualize import mpl
@@ -79,7 +80,7 @@ def _lanes(steps: list[dict]) -> list[dict]:
         if lanes and lanes[-1]["scene"] == scene:
             continue
         lanes.append({"step": s.get("step"), "tool": s.get("tool"),
-                      "check": s.get("check"), "scene": scene})
+                      "check": s.get("check"), "scene": scene, "raw": s})
     return lanes
 
 
@@ -408,13 +409,14 @@ def create_app(
             except (OSError, ValueError):
                 pass
         # Kernel outcome, straight from the artifacts on disk (never computed here).
-        proof_meta, verdict = None, None
+        proof_meta, verdict, proof_full = None, None, None
         proof_file = d / "proof.json"
         if proof_file.is_file():
             try:
-                p = json.loads(proof_file.read_text())
+                proof_full = json.loads(proof_file.read_text())
                 proof_meta = {
-                    k: p.get(k) for k in ("method", "verified_by", "claim", "statement_review")
+                    k: proof_full.get(k)
+                    for k in ("method", "verified_by", "claim", "statement_review")
                 }
             except (OSError, ValueError):
                 pass
@@ -427,7 +429,17 @@ def create_app(
                         break
             except OSError:
                 pass
-        return {"run": run, "spec": spec_meta, "proof": proof_meta, "verdict": verdict, **out}
+        # The result in plain English, built from proof.json and the last state
+        # the kernel checked. Facts only: this restates the stamp, it never
+        # raises it.
+        explain_rows, explain_summary = [], None
+        if proof_meta is not None:
+            lanes = _lanes(read_trace(d)["steps"])
+            final = lanes[-1]["check"] if lanes else None
+            explain_rows = explain.result_rows(None, proof_full, None, final)
+            explain_summary = explain.result_summary(proof_full, None)
+        return {"run": run, "spec": spec_meta, "proof": proof_meta, "verdict": verdict,
+                "explain": explain_rows, "explain_summary": explain_summary, **out}
 
     @app.get("/api/trace/{run}/render/{step}")
     def trace_render(run: str, step: int):
@@ -467,10 +479,18 @@ def create_app(
         drawing that state twice would stack identical geometry, so consecutive
         identical scenes collapse to one entry.
         """
-        return [
-            {"step": lane["step"], "tool": lane["tool"], "check": lane["check"]}
-            for lane in _lanes(read_trace(run_dir(run))["steps"])
-        ]
+        lanes = _lanes(read_trace(run_dir(run))["steps"])
+        out = []
+        for i, lane in enumerate(lanes):
+            out.append({
+                "step": lane["step"],
+                "tool": lane["tool"],
+                "check": lane["check"],
+                # What actually happened here, in words. A reader must not have
+                # to diff two lists of coordinates by eye to see the move.
+                "why": explain.step_line(lane["raw"], lanes[i - 1]["raw"] if i else None),
+            })
+        return out
 
     @app.get("/api/trace/{run}/progression.png")
     def trace_progression_png(run: str):
