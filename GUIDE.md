@@ -45,11 +45,14 @@ Start the notebook for each working session:
 
 `start.sh` is the one-command version. It kills any server still running from
 an earlier session, rebuilds the pi runtime if `agent/src` changed, warns when
-pi has no authenticated provider, and opens the browser with the problem,
-thinking level and turn limit already filled in. Change them from the
-environment: `PROBLEM=circumcenter-in-triangle THINKING=high TURNS=60
-./start.sh`, and `MODEL=provider/model` to pin a model instead of letting pi
-route one.
+pi has no authenticated provider, and opens the browser with the thinking level
+and turn limit filled in.
+
+It does **not** pick the problem, because which problem to work on is your
+choice: the dropdown stays on "choose a bundled problem" and waits for you.
+Preset it only if you want to, with `PROBLEM=circumcenter-in-triangle
+./start.sh`. The same goes for `THINKING`, `TURNS`, `PORT`, and
+`MODEL=provider/model` to pin a model instead of letting pi route one.
 
 Your browser opens the **reasoning notebook** at **http://127.0.0.1:8642**.
 If it does not open, enter that address manually. If the port is busy, use

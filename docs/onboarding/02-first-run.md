@@ -27,10 +27,11 @@ Check the install:
 If you only want the notebook open and ready, `./start.sh` from the repo root
 does the whole thing in one command: it kills any stale server, rebuilds the pi
 runtime when `agent/src` has changed, warns if pi has no authenticated provider,
-then opens the browser on a page with the problem, thinking level and turn limit
-already set. Override any of them from the environment, for example
-`PROBLEM=circumcenter-in-triangle THINKING=high ./start.sh`. The rest of this
-page is the same thing done by hand, which is worth reading once.
+then opens the browser with the thinking level and turn limit set. It leaves the
+problem to you, because that is the one choice a launcher has no business
+making. Override any setting from the environment, for example
+`THINKING=high TURNS=60 ./start.sh`. The rest of this page is the same thing
+done by hand, which is worth reading once.
 
 You should see eleven bundled problems:
 

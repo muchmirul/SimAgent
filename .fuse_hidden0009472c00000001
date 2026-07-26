@@ -7,19 +7,15 @@
 # a pi runtime that matches its source, and a URL with the run controls
 # already set.
 #
-# It sets up the session but never picks the problem: that choice is yours,
-# in the dropdown. Override anything from the environment:
-#   PORT=8700 THINKING=high TURNS=60 ./start.sh
-#   PROBLEM=circumcenter-in-triangle ./start.sh   # only if you want it preset
+# Override anything from the environment:
+#   PORT=8700 PROBLEM=circumcenter-in-triangle THINKING=high TURNS=60 ./start.sh
 #   MODEL=openai-codex/gpt-5.6-sol ./start.sh
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8642}"
-# No default problem on purpose: WHICH problem to work on is the user's choice,
-# not the launcher's. Empty leaves the dropdown on "choose a bundled problem".
-PROBLEM="${PROBLEM:-}"
+PROBLEM="${PROBLEM:-circumcenter-in-tetrahedron}"
 THINKING="${THINKING:-max}"
 TURNS="${TURNS:-40}"
 MODEL="${MODEL:-}"   # empty means: let pi route its first authenticated vision model
@@ -43,13 +39,12 @@ fi
 # 3. Say plainly if no model can be routed, rather than failing at Run agent.
 if [ ! -f "$HOME/.pi/agent/auth.json" ]; then
   echo "WARNING: pi has no authenticated provider, so 'Run agent' will fail."
-  echo "         Bundled problems still solve without any model, for example:"
-  echo "           .venv/bin/simagent solve circumcenter-in-tetrahedron"
+  echo "         Bundled problems still solve without any model:"
+  echo "           .venv/bin/simagent solve $PROBLEM"
   echo "         To fix: (cd agent && npx pi)   then /login inside pi"
 fi
 
-URL="http://127.0.0.1:${PORT}/?thinking=${THINKING}&turns=${TURNS}"
-[ -n "$PROBLEM" ] && URL="${URL}&problem=${PROBLEM}"
+URL="http://127.0.0.1:${PORT}/?problem=${PROBLEM}&thinking=${THINKING}&turns=${TURNS}"
 [ -n "$MODEL" ] && URL="${URL}&model=${MODEL}"
 
 .venv/bin/simagent web --port "$PORT" --no-browser &
@@ -63,8 +58,7 @@ for _ in $(seq 1 60); do
 done
 
 echo "SimAgent notebook: $URL"
-echo "problem=${PROBLEM:-yours to pick in the dropdown}  thinking=$THINKING  turns=$TURNS"
-echo "model=${MODEL:-first authenticated vision model}"
+echo "problem=$PROBLEM  thinking=$THINKING  turns=$TURNS  model=${MODEL:-first authenticated vision model}"
 echo "Ctrl-C stops the server."
 xdg-open "$URL" >/dev/null 2>&1 || true
 
