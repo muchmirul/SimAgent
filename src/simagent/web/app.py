@@ -40,6 +40,21 @@ _STATIC = Path(__file__).parent / "static"
 PROBLEMS_DIR = "problems"
 
 
+class _FreshStatic(StaticFiles):
+    """Never let a browser cache the UI.
+
+    This is a local single-user tool whose files change while you are using it.
+    A cached app.js means an edit appears to do nothing, and the failure looks
+    like a broken feature rather than a stale file, which is the most expensive
+    kind of confusion. Bandwidth is not a concern over loopback.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 def _lanes(steps: list[dict]) -> list[dict]:
     """One entry per state the configuration actually reached.
 
@@ -598,5 +613,5 @@ def create_app(
     def index():
         return FileResponse(_STATIC / "index.html")
 
-    app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+    app.mount("/static", _FreshStatic(directory=_STATIC), name="static")
     return app
