@@ -48,7 +48,7 @@ if [ ! -f "$HOME/.pi/agent/auth.json" ]; then
   echo "         To fix: (cd agent && npx pi)   then /login inside pi"
 fi
 
-URL="http://127.0.0.1:${PORT}/?thinking=${THINKING}&turns=${TURNS}"
+URL="http://localhost:${PORT}/?thinking=${THINKING}&turns=${TURNS}"
 [ -n "$PROBLEM" ] && URL="${URL}&problem=${PROBLEM}"
 [ -n "$MODEL" ] && URL="${URL}&model=${MODEL}"
 
@@ -58,7 +58,7 @@ trap 'kill $SERVER 2>/dev/null || true' EXIT INT TERM
 
 # 4. Open the browser only once the server answers, so the page is never blank.
 for _ in $(seq 1 60); do
-  if curl -sf "http://127.0.0.1:${PORT}/api/problems" >/dev/null 2>&1; then break; fi
+  if curl -sf "http://localhost:${PORT}/api/problems" >/dev/null 2>&1; then break; fi
   sleep 0.25
 done
 

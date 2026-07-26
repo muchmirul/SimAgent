@@ -54,7 +54,7 @@ Preset it only if you want to, with `PROBLEM=circumcenter-in-triangle
 ./start.sh`. The same goes for `THINKING`, `TURNS`, `PORT`, and
 `MODEL=provider/model` to pin a model instead of letting pi route one.
 
-Your browser opens the **reasoning notebook** at **http://127.0.0.1:8642**.
+Your browser opens the **reasoning notebook** at **http://localhost:8642**.
 If it does not open, enter that address manually. If the port is busy, use
 `.venv/bin/simagent web --port 8700`. The default address is local-only; do
 not expose the notebook publicly because it has no user authentication.

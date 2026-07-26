@@ -108,7 +108,7 @@ Example verdict from the tetrahedron run — note the witness is *exact*:
 .venv/bin/simagent web
 ```
 
-Opens `http://127.0.0.1:8642` — a Jupyter-style notebook whose output is not
+Opens `http://localhost:8642` — a Jupyter-style notebook whose output is not
 text but the agent's **visual chain of thought**:
 
 - **In [ ]:** the problem — pick a bundled conjecture or type one in plain

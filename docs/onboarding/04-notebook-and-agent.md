@@ -20,7 +20,7 @@ took, or branch the run from exactly that state.
 .venv/bin/simagent web
 ```
 
-Your browser opens `http://127.0.0.1:8642`. If it does not, type that address
+Your browser opens `http://localhost:8642`. If it does not, type that address
 in. If the port is busy, use `--port 8700`. The address is local only and the
 notebook has **no user authentication**, so do not expose it publicly.
 

@@ -224,7 +224,11 @@ def main(argv=None) -> int:
 
     w = sub.add_parser("web", help="browser sandbox: live 3D UI + Manim rendering")
     w.add_argument("problem", nargs="?", help="problem to open first (see `simagent list`)")
-    w.add_argument("--host", default="127.0.0.1")
+    # localhost, not 127.0.0.1: on a machine where localhost resolves to ::1
+    # a 127.0.0.1 bind simply does not answer http://localhost, and the
+    # browser fails or stalls on the IPv6 attempt first. Still loopback only,
+    # because the notebook has no authentication.
+    w.add_argument("--host", default="localhost")
     w.add_argument("--port", type=int, default=8642)
     w.add_argument("--out", help="run directory root (default runs/web)")
     w.add_argument("--no-browser", action="store_true")
