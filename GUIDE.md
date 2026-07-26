@@ -117,8 +117,11 @@ The agent's senses and hands, beyond looking and moving points:
    - the **equations** the harness wrote down for that state (amber box)
    - a **diff**: which points moved (`- before` / `+ after`) and the margin change
    - a **HOLDS / FAILS** badge with the margin (margin > 0 ⇔ the property holds)
-7. When the run ends, a final **Out [all]** cell draws every state the run
-   reached in **one** picture: pale for early, deep for late. A single cell
+7. When the run ends, a final **Out [all]** cell always appears. It draws
+   every state the run reached in **one** picture: pale for early, deep for
+   late. A run that never moved the configuration still gets the cell, saying
+   so plainly, because "nothing moved" is information: it means the answer came
+   from proving rather than from searching. A single cell
    answers "what did it do"; only this one answers "where was it going". Click
    it for the interactive version, which lists each state with a switch, so you
    can isolate any one of them or compare two. Colour means time there, never

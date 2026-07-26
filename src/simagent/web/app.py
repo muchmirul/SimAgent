@@ -118,8 +118,11 @@ def _combined_scene(lanes: list[dict]) -> list[dict]:
                 p["opacity"] = fade
             combined.append(p)
     steps = ", ".join(f"[{lane['step']}] {lane['tool'] or '—'}" for lane in lanes)
-    combined.append({"type": "label",
-                     "text": f"{len(lanes)} states, pale = early, deep = late: {steps}"})
+    combined.append({"type": "label", "text": (
+        f"1 state, the only configuration this run reached: {steps}"
+        if len(lanes) == 1 else
+        f"{len(lanes)} states, pale = early, deep = late: {steps}"
+    )})
     return combined
 
 
@@ -478,8 +481,8 @@ def create_app(
         """
         d = run_dir(run)
         lanes = _lanes(read_trace(d)["steps"])
-        if len(lanes) < 2:
-            raise HTTPException(404, "this run reached fewer than two distinct states")
+        if not lanes:
+            raise HTTPException(404, "this run never drew a configuration")
         title = None
         spec_file = d / "spec.json"
         if spec_file.is_file():

@@ -108,6 +108,44 @@ def test_the_page_renders_cells_a_verdict_and_the_progression(served_run):
 
 
 @pytest.mark.skipif(_chrome() is None, reason="no headless Chromium available")
+def test_the_progression_cell_appears_even_for_a_run_that_never_moved(tmp_path):
+    """Out [all] must appear on EVERY finished run.
+
+    A cell that shows up only sometimes reads as broken, and "the run never
+    moved the configuration" is itself worth seeing: it says the answer came
+    from proving rather than from searching.
+    """
+    import uvicorn
+
+    from simagent.web import create_app
+
+    run = AgentRun(get("positive-quadratic"), tmp_path / "agent-still")
+    run.dispatch("look", {})
+    run.dispatch("finish", {"summary": "proved without moving anything"})
+    run.finalize()
+
+    port = _free_port()
+    app = create_app(out_root=str(tmp_path / "web"), runs_root=str(tmp_path))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    try:
+        dom = _dump_dom(_chrome(), f"http://127.0.0.1:{port}/?run=agent-still")
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    assert 'id="progressionWrap"' in dom, "one state must still get the cell"
+    assert "progbox" in dom, "and the cell must carry its body"
+    assert "progression.png" in dom, "one state is still a picture"
+    assert "the only state this run reached" in dom, "say plainly that nothing moved"
+
+
+@pytest.mark.skipif(_chrome() is None, reason="no headless Chromium available")
 def test_no_javascript_errors_on_the_page(served_run, tmp_path):
     """A thrown exception stops cell rendering silently, which looks like a
     missing feature rather than a crash."""

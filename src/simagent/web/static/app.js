@@ -951,7 +951,7 @@ function openProgression() {
   const panel = $('ovLanes');
   panel.replaceChildren();
   const head = el('div', 'lanehead');
-  head.appendChild(el('span', null, `${nb.lanes.length} states`));
+  head.appendChild(el('span', null, nb.lanes.length === 1 ? '1 state' : `${nb.lanes.length} states`));
   const all = el('button', 'mini', 'all');
   const none = el('button', 'mini', 'none');
   head.append(all, none);
@@ -1003,11 +1003,24 @@ function openProgression() {
 // The last cell: the whole run as one picture. It appears when the run is
 // finished, because a progression is only complete once there is no next step.
 function progressionCell() {
-  if (nb.lanes.length < 2 || $('progressionWrap')) return;
+  if ($('progressionWrap')) return;
   const cell = el('section', 'cell');
   cell.id = 'progressionWrap';
   cell.appendChild(el('div', 'gut out', 'Out [all]:'));
   const body = el('div', 'progbox');
+  // Always present once a run ends, even for one state or none. A cell that
+  // appears only sometimes reads as broken, and "the run never moved the
+  // configuration" is itself worth knowing: it says the answer came from
+  // proving rather than from searching.
+  if (!nb.lanes.length) {
+    body.appendChild(el('div', 'note',
+      'This run never drew a configuration, so there is nothing to overlay. '
+      + 'That happens when the claim was settled without touching the world.'));
+    cell.appendChild(body);
+    $('cells').after(cell);
+    return;
+  }
+  const one = nb.lanes.length === 1;
   // The picture first, without a click: the combined view is the answer to
   // "where was it going", and hiding it behind a button hides the answer.
   const img = el('img', 'sceneimg');
@@ -1018,14 +1031,19 @@ function progressionCell() {
   img.onclick = openProgression;
   img.onerror = () => img.remove();
   body.appendChild(img);
-  const open = el('button', null, `⧉ open all ${nb.lanes.length} states, with per-state switches`);
+  const open = el('button', null, one
+    ? '⧉ open the only state this run reached, in 3D'
+    : `⧉ open all ${nb.lanes.length} states, with per-state switches`);
   open.onclick = openProgression;
   body.appendChild(open);
-  body.appendChild(el('div', 'note',
-    'Each cell above shows one moment. This draws every configuration the run '
-    + 'reached in a single 3D scene, pale for early and deep for late, with a '
-    + 'switch per state so you can isolate any of them. Colour means time here, '
-    + 'never holds or fails: the margin next to each state carries that.'));
+  body.appendChild(el('div', 'note', one
+    ? 'This run reached one configuration and never moved it, so there is no '
+      + 'trajectory to show. That is information: the answer came from proving '
+      + 'or from a single look, not from searching.'
+    : 'Each cell above shows one moment. This draws every configuration the run '
+      + 'reached in a single 3D scene, pale for early and deep for late, with a '
+      + 'switch per state so you can isolate any of them. Colour means time here, '
+      + 'never holds or fails: the margin next to each state carries that.'));
   cell.appendChild(body);
   $('cells').after(cell);
 }
