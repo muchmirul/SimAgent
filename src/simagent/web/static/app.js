@@ -192,6 +192,7 @@ function imagineCell(step) {
   if (step.image) {
     const img = el('img', 'sceneimg');
     img.loading = 'lazy';
+    img.onload = () => img.classList.add('loaded');
     img.alt = `imagined scene at step ${step.step}`;
     img.src = `/api/trace/${encodeURIComponent(nb.run)}/file/${step.image}`;
     img.onerror = () => img.remove();
@@ -320,6 +321,7 @@ function appendStep(step) {
   if (step.tool) {
     const img = el('img', 'sceneimg');
     img.loading = 'lazy';
+    img.onload = () => img.classList.add('loaded');
     img.alt = `scene at step ${step.step}`;
     img.src = step.image
       ? `/api/trace/${encodeURIComponent(nb.run)}/file/${step.image}`
