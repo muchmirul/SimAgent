@@ -1,0 +1,80 @@
+{
+  "format": "claim/1",
+  "id": "circumcenter-near-centroid",
+  "title": "A tetrahedron's circumcenter stays near its centroid",
+  "conjecture": "For every tetrahedron with vertices in the cube [-1,1]^3 and volume at least 0.02, the circumcenter lies within distance 40 of the centroid.",
+  "latex": "\\forall\\, T \\subset [-1,1]^3,\\ \\mathrm{vol}(T) \\ge 0.02:\\quad |O(T) - G(T)| < 40",
+  "quantifier": "forall",
+  "spaces": [
+    {
+      "name": "T",
+      "shape": [
+        4,
+        3
+      ],
+      "low": -1.0,
+      "high": 1.0,
+      "kind": "real"
+    }
+  ],
+  "constraint": {
+    "kind": "min_volume",
+    "of": "T",
+    "threshold": 0.02
+  },
+  "recipe": [
+    {
+      "name": "O",
+      "ctor": "circumcenter",
+      "args": [
+        "T"
+      ]
+    },
+    {
+      "name": "G",
+      "ctor": "centroid",
+      "args": [
+        "T"
+      ]
+    },
+    {
+      "name": "WG",
+      "ctor": "barycentric",
+      "args": [
+        "T",
+        "G"
+      ]
+    },
+    {
+      "name": "d2",
+      "ctor": "distance_sq",
+      "args": [
+        "O",
+        "G"
+      ]
+    }
+  ],
+  "measure": {
+    "kind": "expr",
+    "margin": "900 - d2"
+  },
+  "certify": {
+    "kind": "expr",
+    "margin": "900 - d2"
+  },
+  "lean": {
+    "kind": "recipe",
+    "margin": "900 - d2",
+    "of": "T",
+    "theorem": "circumcenter_near_centroid_disproof_witness",
+    "title": "Witness tetrahedron whose circumcenter is more than 40 from its centroid"
+  },
+  "scene": {
+    "kind": "simplex",
+    "of": "T",
+    "center": "G",
+    "weights": "WG",
+    "circle": false
+  },
+  "notes": "Not bundled, and built to be WATCHED. It is false, but blind search does not find it: 2000 random trials plus annealing come back empty, while five to seven `refine` calls reach it. That gap is the point. The volume floor forbids the obvious move, so the model has to squash the tetrahedron along one direction while keeping it fat in another, and every attempt is a visibly different shape. Compare with the bundled claims, which any obtuse triangle refutes in one move, leaving nothing to watch."
+}
