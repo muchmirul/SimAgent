@@ -335,17 +335,21 @@ function appendStep(step) {
     const img = el('img', 'sceneimg');
     img.loading = 'lazy';
     img.alt = `scene at step ${step.step}`;
-    img.src = step.image
+    // A `look` image is a RECORD, saved at the moment the agent saw it. When it
+    // was drawn by an older renderer, showing it here would put one picture in
+    // a style nothing else on the page uses, so the same state is drawn fresh.
+    // The saved file is never touched: it stays on disk as evidence of what the
+    // model actually perceived.
+    const own = step.image && !step.image_stale;
+    img.src = own
       ? `/api/trace/${encodeURIComponent(nb.run)}/file/${step.image}`
       : `/api/trace/${encodeURIComponent(nb.run)}/render/${step.step}`;
     img.onerror = () => { img.remove(); cap.remove(); };
-    // A `look` image is a RECORD, saved at the moment the agent saw it, not a
-    // render of current state. Runs made before the light theme therefore show
-    // dark pictures forever, and that is correct: redrawing them would change
-    // what the model is on record as having perceived.
     const cap = el('div', 'caption',
-      step.image ? 'what the agent saw, saved at that moment — click for interactive 3D'
-                 : 'scene after this step — click for interactive 3D');
+      own ? 'what the agent saw, saved at that moment — click for interactive 3D'
+        : step.image
+          ? 'this state, drawn now (the agent\'s own image is older than the renderer) — click for interactive 3D'
+          : 'scene after this step — click for interactive 3D');
     if (hasScene) img.onclick = () => open3d(step);
     out.appendChild(img);
     out.appendChild(cap);
@@ -1022,6 +1026,7 @@ function progressionCell() {
     + 'reached in a single 3D scene, pale for early and deep for late, with a '
     + 'switch per state so you can isolate any of them. Colour means time here, '
     + 'never holds or fails: the margin next to each state carries that.'));
+  cell.appendChild(body);
   $('cells').after(cell);
 }
 

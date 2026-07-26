@@ -247,6 +247,13 @@ Each module is described once, here. State it nowhere else.
   constraint, constructor, certifier, Lean hook, or scene. Give it an accurate
   `doc` string, because `llm.py` generates the model's menu from those docs.
 - Tests must stay offline: no API calls, no manim requirement.
+- A UI change is not done until the PAGE is checked, not the API. Three
+  separate bugs shipped green because endpoints returned 200 while the page
+  was broken: a cell built and never appended to its parent, a server bound
+  to an address the browser did not resolve to, and pictures drawn in the
+  old style. `tests/test_ui_browser.py` loads the real page in headless
+  Chromium and asserts on the rendered DOM; it skips when no browser is
+  present. Run it, and take a screenshot, before calling UI work finished.
 
 ## Roadmap
 

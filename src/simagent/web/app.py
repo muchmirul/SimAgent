@@ -380,6 +380,20 @@ def create_app(
         viewer can poll and follow a live agent."""
         d = run_dir(run)
         out = read_trace(d, after=after)
+        # A `look` image is a record of what the agent saw, saved at that
+        # moment, so it is drawn in whatever style the renderer had then. Runs
+        # older than the current renderer would therefore fill the notebook
+        # with pictures in a style nothing else uses. Flag those: the UI draws
+        # the same state fresh instead, and the saved file stays untouched on
+        # disk, because it is evidence of what the model perceived.
+        for step in out.get("steps", []):
+            image = step.get("image")
+            if not image:
+                continue
+            f = (d / image).resolve()
+            step["image_stale"] = (
+                not f.is_file() or f.stat().st_mtime < _RENDERER_MTIME
+            )
         spec_meta = None
         spec_file = d / "spec.json"
         if spec_file.is_file():

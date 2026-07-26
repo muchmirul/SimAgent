@@ -146,6 +146,34 @@ def _cmd_agent(args) -> int:
     return code
 
 
+def _loopback_sockets(port: int) -> list:
+    """Listen on BOTH loopback addresses, 127.0.0.1 and ::1.
+
+    "localhost" is one name for two addresses, and nothing guarantees a browser
+    and a Python process resolve it the same way. On this machine it resolves
+    to ::1, so a server bound only to 127.0.0.1 answers curl and refuses the
+    browser: the page never loads and every later change looks broken. Binding
+    both ends that class of bug. It is still loopback only, so nothing is
+    exposed to the network.
+    """
+    import socket
+
+    sockets = []
+    for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        try:
+            s = socket.socket(family, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            s.bind((address, port))
+            s.listen(2048)
+            s.set_inheritable(True)
+            sockets.append(s)
+        except OSError as exc:  # one family missing is fine; both is not
+            print(f"note: cannot listen on {address}:{port} ({exc})")
+    return sockets
+
+
 def _cmd_web(args) -> int:
     import threading
     import webbrowser
@@ -161,7 +189,14 @@ def _cmd_web(args) -> int:
     if not args.no_browser:
         threading.Timer(0.8, webbrowser.open, args=(url,)).start()
     print(f"SimAgent sandbox: {url}")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    config = uvicorn.Config(app, log_level="warning")
+    if args.host == "localhost":
+        sockets = _loopback_sockets(args.port)
+        if not sockets:
+            raise SystemExit(f"port {args.port} is busy on both loopback addresses")
+        uvicorn.Server(config).run(sockets=sockets)
+    else:  # an explicit --host: bind exactly what was asked for
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
 
