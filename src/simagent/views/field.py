@@ -76,10 +76,15 @@ def render_field(
                 "paints margins; use view kind='sweep', which plots holds instead"
             )
         raise ValueError("no evaluable grid points on this slice (constraint too strict?)")
-    scale = max(float(np.abs(finite).max()), 1e-9)
-    fig, ax = _style.dark_figure()
-    mesh = ax.pcolormesh(xs, ys, margins, cmap=_style.CMAP, vmin=-scale, vmax=scale,
-                         shading="auto")
+    # Zero stays the colour centre (that is the contract), but each side gets
+    # its own extreme. A single symmetric scale hides the failure region
+    # whenever the claim holds by a wide margin somewhere: margins from -1 to
+    # +17 would paint every failing cell almost the background colour, which is
+    # the one region the reader is looking for.
+    lo, hi = float(finite.min()), float(finite.max())
+    fig, ax = _style.figure()
+    norm = _style.centered_norm(lo, hi)
+    mesh = ax.pcolormesh(xs, ys, margins, cmap=_style.CMAP, norm=norm, shading="auto")
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label("margin  (blue: HOLDS · red: FAILS)", color=_style.DIM, fontsize=8)
     cbar.ax.tick_params(colors=_style.DIM, labelsize=7)

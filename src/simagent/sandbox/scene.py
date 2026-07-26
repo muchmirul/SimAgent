@@ -19,19 +19,30 @@ def _pts3(coords) -> list[list[float]]:
     return [_pt3(p) for p in coords]
 
 
-def points(coords, color: str = "#ffffff", radius: float = 0.05, name: str | None = None) -> dict:
+# One palette, so every renderer agrees on what a thing looks like. Tuned for
+# a LIGHT background, because that is what the notebook, the matplotlib preview
+# and the Manim scene all draw on: a near-white ink would simply disappear.
+INK = "#1c1e21"    # the objects themselves
+EDGE = "#5f6368"   # structure between objects
+FACE = "#4a90d9"   # polygon and mesh fills
+HALO = "#c8890a"   # circumsphere and other soft indicators
+GOOD = "#137333"   # the property holds
+BAD = "#c5221f"    # the property fails
+
+
+def points(coords, color: str = INK, radius: float = 0.05, name: str | None = None) -> dict:
     return {"type": "points", "coords": _pts3(coords), "color": color, "radius": radius, "name": name}
 
 
-def segments(pairs, color: str = "#9aa0a6", width: float = 2.0) -> dict:
+def segments(pairs, color: str = EDGE, width: float = 2.0) -> dict:
     return {"type": "segments", "pairs": [[_pt3(a), _pt3(b)] for a, b in pairs], "color": color, "width": width}
 
 
-def polygon(coords, color: str = "#4a90d9", opacity: float = 0.35) -> dict:
+def polygon(coords, color: str = FACE, opacity: float = 0.35) -> dict:
     return {"type": "polygon", "coords": _pts3(coords), "color": color, "opacity": opacity}
 
 
-def mesh(vertices, faces, color: str = "#4a90d9", opacity: float = 0.3) -> dict:
+def mesh(vertices, faces, color: str = FACE, opacity: float = 0.3) -> dict:
     return {
         "type": "mesh",
         "vertices": _pts3(vertices),
@@ -41,7 +52,7 @@ def mesh(vertices, faces, color: str = "#4a90d9", opacity: float = 0.3) -> dict:
     }
 
 
-def sphere(center, radius: float, color: str = "#f2c14e", opacity: float = 0.12) -> dict:
+def sphere(center, radius: float, color: str = HALO, opacity: float = 0.12) -> dict:
     return {"type": "sphere", "center": _pt3(center), "radius": float(radius), "color": color, "opacity": opacity}
 
 

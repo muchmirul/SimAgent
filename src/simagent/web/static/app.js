@@ -192,7 +192,6 @@ function imagineCell(step) {
   if (step.image) {
     const img = el('img', 'sceneimg');
     img.loading = 'lazy';
-    img.onload = () => img.classList.add('loaded');
     img.alt = `imagined scene at step ${step.step}`;
     img.src = `/api/trace/${encodeURIComponent(nb.run)}/file/${step.image}`;
     img.onerror = () => img.remove();
@@ -321,7 +320,6 @@ function appendStep(step) {
   if (step.tool) {
     const img = el('img', 'sceneimg');
     img.loading = 'lazy';
-    img.onload = () => img.classList.add('loaded');
     img.alt = `scene at step ${step.step}`;
     img.src = step.image
       ? `/api/trace/${encodeURIComponent(nb.run)}/file/${step.image}`
@@ -711,14 +709,14 @@ function ensureOverlay() {
   renderer.setPixelRatio(window.devicePixelRatio);
   frame.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e0e12);
+  scene.background = new THREE.Color(0xf7f8fa);
   const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
   camera.position.set(3.2, 2.4, 3.2);
   camera.up.set(0, 0, 1); // math convention: z up
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
-  const grid = new THREE.GridHelper(6, 12, 0x2a2a32, 0x1b1b22);
+  const grid = new THREE.GridHelper(6, 12, 0xc8cdd4, 0xe3e6ea);
   grid.rotation.x = Math.PI / 2; // xy-plane, z up
   scene.add(grid);
   const group = new THREE.Group();

@@ -26,7 +26,7 @@ def render_trajectory(steps: list[dict], out_path, title: str | None = None) -> 
     if not xs:
         raise ValueError("no margin-valued committed steps to plot")
 
-    fig, ax = _style.dark_figure(figsize=(6.4, 3.2))
+    fig, ax = _style.figure(figsize=(6.4, 3.2))
     ax.axhline(0.0, color=_style.ZERO_CONTOUR, linewidth=1.0)
     ax.plot(xs, ys, color="#6ab0f3", linewidth=1.4, marker="o", markersize=4)
     for x, y, t in zip(xs, ys, tools):

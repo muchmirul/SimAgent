@@ -329,19 +329,19 @@ def _scene_simplex(env: dict, params: dict) -> list[dict]:
     r = float(np.linalg.norm(T[0] - c))  # true radius, full dimension
     prims = []
     if d == 2:
-        prims.append(scene.polygon(T, color="#4a90d9", opacity=0.45))
+        prims.append(scene.polygon(T, color=scene.FACE, opacity=0.45))
     elif d >= 3:
         faces = [[i, j, k] for i in range(m) for j in range(i + 1, m)
                  for k in range(j + 1, m)]
-        prims.append(scene.mesh(P.tolist(), faces, color="#4a90d9", opacity=0.25))
+        prims.append(scene.mesh(P.tolist(), faces, color=scene.FACE, opacity=0.25))
     edges = [(P[i], P[j]) for i in range(m) for j in range(i + 1, m)]
-    prims.append(scene.segments(edges, color="#dfe3e8", width=2.0))
+    prims.append(scene.segments(edges, color=scene.EDGE, width=2.0))
     # the sphere is the CIRCUMsphere: only honest when the centre is the
     # circumcentre, so a claim about another centre turns it off
     if not projected and params.get("circle", True):
-        prims.append(scene.sphere(c3, r, color="#f2c14e", opacity=0.10))
-    prims.append(scene.points(P, color="#ffffff", radius=0.05))
-    prims.append(scene.points([c3], color="#2ecc71" if inside else "#e74c3c",
+        prims.append(scene.sphere(c3, r, color=scene.HALO, opacity=0.14))
+    prims.append(scene.points(P, color=scene.INK, radius=0.05))
+    prims.append(scene.points([c3], color=scene.GOOD if inside else scene.BAD,
                               radius=0.07, name=center_name))
     label = "circumcenter %s (min barycentric = %.3f)" % (
         "inside" if inside else "OUTSIDE", float(w.min()))
@@ -363,9 +363,9 @@ def _scene_hull3d(env: dict, params: dict) -> list[dict]:
                 seen.add((a, b))
                 edges.append((verts[a], verts[b]))
     return [
-        scene.mesh(verts, faces, color="#4a90d9", opacity=0.25),
-        scene.segments(edges, color="#dfe3e8", width=1.5),
-        scene.points(Pts, color="#ffffff", radius=0.04),
+        scene.mesh(verts, faces, color=scene.FACE, opacity=0.25),
+        scene.segments(edges, color=scene.EDGE, width=1.5),
+        scene.points(Pts, color=scene.INK, radius=0.04),
         scene.label("V=%d  E=%d  F=%d   V-E+F=%d" % (V, E, F, V - E + F)),
     ]
 
@@ -373,7 +373,7 @@ def _scene_hull3d(env: dict, params: dict) -> list[dict]:
 def _scene_gnomon(env: dict, params: dict) -> list[dict]:
     n = int(env[params["of"]])
     k = min(max(n, 1), 14)
-    palette = ["#4a90d9", "#f2c14e", "#2ecc71", "#e74c3c", "#9b59b6", "#e67e22", "#1abc9c"]
+    palette = ["#1a73e8", "#c8890a", "#137333", "#c5221f", "#7b3fa0", "#c05621", "#0f766e"]
     prims = []
     s = 2.4 / k
     for layer in range(k):
@@ -399,8 +399,8 @@ def _scene_graph(env: dict, params: dict) -> list[dict]:
     edges = [(P[i], P[j]) for i in range(n) for j in range(i + 1, n) if A[i, j] > 0]
     prims = []
     if edges:
-        prims.append(scene.segments(edges, color="#4a90d9", width=2.5))
-    prims.append(scene.points(P, color="#ffffff", radius=0.06, name=params["of"]))
+        prims.append(scene.segments(edges, color=scene.FACE, width=2.5))
+    prims.append(scene.points(P, color=scene.INK, radius=0.06, name=params["of"]))
     deg = A.sum(axis=1).astype(int)
     prims.append(scene.label(
         "%d vertices, %d edges, degrees %s"
@@ -417,8 +417,8 @@ def _scene_point(env: dict, params: dict) -> list[dict]:
     d = A.shape[-1] if A.ndim >= 1 else 1
     origin = [0.0] * P.shape[1]
     prims = [
-        scene.segments([(origin, p) for p in P], color="#dfe3e8", width=1.5),
-        scene.points(P, color="#f2c14e", radius=0.06, name=params["of"]),
+        scene.segments([(origin, p) for p in P], color=scene.EDGE, width=1.5),
+        scene.points(P, color=scene.HALO, radius=0.06, name=params["of"]),
     ]
     label = "%s = %s" % (params["of"], np.array2string(A, precision=3))
     if d > 3:

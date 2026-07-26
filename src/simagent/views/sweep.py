@@ -74,7 +74,7 @@ def render_sweep(
                 t = a / (a - b)
                 crossings.append(float(xs[i] + t * (xs[i + 1] - xs[i])))
 
-    fig, ax = _style.dark_figure(figsize=(6.4, 3.6))
+    fig, ax = _style.figure(figsize=(6.4, 3.6))
     label = f"{var}[{r}][{coord}]" if base.ndim == 2 else (
         f"{var}[{coord}]" if base.ndim == 1 else var)
     if have_margin:

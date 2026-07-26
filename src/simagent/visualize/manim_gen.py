@@ -46,7 +46,7 @@ class ConjectureScene(ThreeDScene):
         labels = []
         for prim in SCENE:
             kind = prim["type"]
-            color = ManimColor(prim.get("color", "#ffffff"))
+            color = ManimColor(prim.get("color", "#1c1e21"))
             if kind == "points":
                 for p in prim["coords"]:
                     self.add(Dot3D(point=T(p), color=color,
