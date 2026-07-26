@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from ..library import all_specs, get
 from ..spec import ProblemSpec
 from ..core.journal import TRACE_FILE, read_trace
+from ..sandbox import scene as scene_mod
 from ..visualize import mpl
 from ..visualize.manim_gen import manim_available, try_render_manim, write_manim_scene
 from .session import SandboxSession
@@ -38,6 +39,13 @@ _STATIC = Path(__file__).parent / "static"
 # NOT bundled: trust is by object identity with the bundled registry, so a Lean
 # stamp on one of these still says statement_review = spec-generated-review-needed.
 PROBLEMS_DIR = "problems"
+
+# Cached step pictures are only valid while the code that drew them is. Both
+# files matter: mpl.py draws, scene.py chooses the colours.
+_RENDERER_MTIME = max(
+    Path(mpl.__file__).stat().st_mtime,
+    Path(scene_mod.__file__).stat().st_mtime,
+)
 
 
 class _FreshStatic(StaticFiles):
@@ -407,10 +415,16 @@ def create_app(
     @app.get("/api/trace/{run}/render/{step}")
     def trace_render(run: str, step: int):
         """Server-side PNG of one step's scene graph (matplotlib, cached).
-        Steps are append-only, so the cache never goes stale."""
+
+        Steps are append-only, so a step's scene never changes. The RENDERER
+        does: when it did, every cached picture kept the old look and the UI
+        appeared to revert. So the cache is also invalid whenever the renderer
+        is newer than the picture it produced.
+        """
         d = run_dir(run)
         cache = d / "trace_renders" / f"step_{step:03d}.png"
-        if not cache.is_file():
+        stale = cache.is_file() and cache.stat().st_mtime < _RENDERER_MTIME
+        if not cache.is_file() or stale:
             entry = next((s for s in read_trace(d)["steps"] if s.get("step") == step), None)
             if entry is None:
                 raise HTTPException(404, f"no step {step} in this trace")

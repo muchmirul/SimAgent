@@ -339,8 +339,12 @@ function appendStep(step) {
       ? `/api/trace/${encodeURIComponent(nb.run)}/file/${step.image}`
       : `/api/trace/${encodeURIComponent(nb.run)}/render/${step.step}`;
     img.onerror = () => { img.remove(); cap.remove(); };
+    // A `look` image is a RECORD, saved at the moment the agent saw it, not a
+    // render of current state. Runs made before the light theme therefore show
+    // dark pictures forever, and that is correct: redrawing them would change
+    // what the model is on record as having perceived.
     const cap = el('div', 'caption',
-      step.image ? 'what the agent saw (its own eyes) — click for interactive 3D'
+      step.image ? 'what the agent saw, saved at that moment — click for interactive 3D'
                  : 'scene after this step — click for interactive 3D');
     if (hasScene) img.onclick = () => open3d(step);
     out.appendChild(img);

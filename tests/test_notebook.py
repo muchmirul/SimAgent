@@ -261,3 +261,25 @@ def test_progression_collapses_repeats_and_renders_one_picture(traced_run):
     colors = {p["color"] for p in combined if p.get("type") == "points"}
     assert len(colors) == 2, "each state gets its own colour, or time is unreadable"
     assert combined[-1]["type"] == "label" and "pale = early" in combined[-1]["text"]
+
+
+def test_a_cached_render_is_redrawn_when_the_renderer_changes(traced_run, monkeypatch):
+    """A cached picture is only valid while the code that drew it is.
+
+    Steps are append-only, so a step's scene never changes and caching is
+    sound on that axis. The renderer is the other axis: when the theme moved
+    from dark to light every cached PNG kept the old look, and the UI appeared
+    to revert on its own.
+    """
+    from simagent.web import app as web_app
+
+    with make_client(traced_run) as client:
+        assert client.get("/api/trace/agent-demo/render/2").status_code == 200
+        cache = traced_run / "agent-demo" / "trace_renders" / "step_002.png"
+        stamp = cache.stat().st_mtime_ns
+        assert client.get("/api/trace/agent-demo/render/2").status_code == 200
+        assert cache.stat().st_mtime_ns == stamp, "unchanged renderer must reuse the cache"
+
+        monkeypatch.setattr(web_app, "_RENDERER_MTIME", cache.stat().st_mtime + 60)
+        assert client.get("/api/trace/agent-demo/render/2").status_code == 200
+        assert cache.stat().st_mtime_ns != stamp, "a newer renderer must redraw"
