@@ -262,3 +262,84 @@ def test_user_action_op_is_served_over_the_wire(tmp_path):
     assert replies[0]["ok"] is True and replies[0]["result"]["tool"] == "sample"
     assert replies[1]["ok"] is False  # certify is not a human world move
     assert replies[2]["ok"] is True
+
+
+def test_a_journal_from_an_older_format_is_refused_by_version(tmp_path):
+    """The state hash changed with version 3, so a stale journal must fail with
+    the version message rather than a confusing hash mismatch."""
+    source = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "v3-source")
+    source.call_tool("pi-call-sample", "sample", {"seed": 2})
+    source.finalize()
+
+    stale = tmp_path / "stale.jsonl"
+    lines = source.path.read_text().splitlines()
+    header = json.loads(lines[0])
+    header["version"] = 2
+    stale.write_text("\n".join([json.dumps(header), *lines[1:]]) + "\n")
+
+    with pytest.raises(KernelReplayError, match="unsupported journal version 2"):
+        KernelTransport(
+            get("circumcenter-in-triangle"),
+            tmp_path / "v3-branch",
+            replay_journal=stale,
+            replay_through=1,
+        )
+
+
+def test_scored_predictions_survive_a_branch(tmp_path):
+    """A branch that forgot which predictions were scored would let the model
+    re-learn a lesson it already paid for, and would diverge from its source."""
+    source = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "scored-source")
+    source.call_tool("c1", "expect", {"relation": "<", "value": 0.0})
+    source.call_tool("c2", "set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    assert source.run.scored_expectations, "the prediction must have been scored"
+    expected = source.snapshot()
+
+    branch = KernelTransport(
+        get("circumcenter-in-triangle"),
+        tmp_path / "scored-branch",
+        replay_journal=source.path,
+        replay_through=2,
+    )
+    try:
+        assert branch.snapshot()["stateHash"] == expected["stateHash"]
+        assert branch.run.scored_expectations == source.run.scored_expectations
+        assert "scoredExpectations" in expected["state"]
+    finally:
+        branch.finalize()
+        source.finalize()
+
+
+def test_a_human_move_on_a_finished_world_is_refused_and_recorded(tmp_path):
+    """Refused like any other act after `finish`, and journalled as refused.
+
+    The attempt is real history, so it is written down; what must not happen is
+    the world changing. Swallowing it silently would leave a settled run whose
+    journal cannot explain a coordinate.
+    """
+    transport = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "finished")
+    transport.call_tool("c1", "finish", {"summary": "done"})
+    settled = transport.snapshot()
+
+    refused = transport.user_action("sample", {})
+    assert refused["isError"] is True
+    assert "already finished" in refused["content"][0]["text"]
+    assert refused["state"]["vars"] == settled["state"]["vars"], "the world must not move"
+
+    transport.finalize()
+    with pytest.raises(RuntimeError, match="finalized"):
+        transport.user_action("sample", {})
+
+
+def test_describe_advertises_the_whole_closed_tool_surface(tmp_path):
+    """The TypeScript side checks this list at startup; drift here is drift there."""
+    transport = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "describe")
+    try:
+        described = transport.describe()
+        names = [tool["name"] for tool in described["tools"]]
+        assert "recall" in names
+        assert len(names) == len(set(names)) == 21
+        assert described["journalVersion"] == 3
+        assert described["systemPrompt"] and described["taskPrompt"]
+    finally:
+        transport.finalize()

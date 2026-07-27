@@ -74,3 +74,44 @@ def test_declared_dependencies_cover_what_is_imported():
     declared = {d.split(">")[0].split("=")[0].split("[")[0].strip().lower() for d in deps}
     for needed in ("numpy", "sympy", "matplotlib"):
         assert needed in declared, f"{needed} is imported by the kernel but not declared"
+
+
+def test_ci_runs_every_suite_this_repo_depends_on():
+    """CI is the only place all three suites run together on a clean machine.
+
+    Checked as text on purpose: no YAML parser is a dependency here, and the
+    real risk is a whole job quietly disappearing, which plain strings catch.
+    """
+    from pathlib import Path
+
+    workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+    assert workflow.is_file(), "the repo must have CI"
+    text = workflow.read_text()
+
+    # The Python kernel, both with and without Lean: the contributor rule is
+    # that Lean stays optional, so the degraded path needs its own run.
+    assert text.count("python -m pytest -q") == 2
+    assert 'SIMAGENT_LEAN: "off"' in text
+    assert "elan-init.sh" in text and "lean --version" in text
+
+    # The known-answer test for the whole machine.
+    assert "simagent bench" in text and "pass rate: 11/11" in text
+
+    # The pi runtime, built and tested offline.
+    assert "npm ci" in text and "npm run build" in text and "npm test" in text
+    assert 'PI_OFFLINE: "1"' in text
+
+    # The UI test skips without a browser, and a silent skip is how UI bugs
+    # shipped green before. CI must fail instead.
+    assert text.count("command -v google-chrome") == 2
+
+
+def test_ci_pins_the_lean_the_kernel_was_built_against():
+    """A different Lean is a different kernel; the version must be explicit."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
+    documented = (root / "AGENTS.md").read_text()
+    assert "LEAN_VERSION: v4.32.1" in workflow
+    assert "4.32.1" in documented, "CI and the docs must name the same Lean"

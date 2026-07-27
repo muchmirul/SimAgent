@@ -430,3 +430,9 @@ agent/           TypeScript pi runtime and session service (exact-pinned)
    method are the model's. An instrument may report its own limits (that is
    information); it may not say which method to reach for next (that is
    steering). Pinned by `test_harness_never_picks_the_method_for_the_model`.
+8. Every change lands with a test that fails without it, and CI must stay
+   green. `.github/workflows/ci.yml` runs the Python suite twice (with Lean and
+   with `SIMAGENT_LEAN=off`, because the toolchain is optional and the degraded
+   path is the one most users get), `simagent bench` at 11/11, and the pi suite
+   offline. A UI change is not done until the PAGE is checked: CI fails when no
+   browser is present rather than letting the browser test skip.

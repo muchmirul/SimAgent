@@ -98,6 +98,13 @@ class FakePiControl:
         self.calls.append(("branch", step, kwargs))
         return {"run": f"branch-{run}-step-{step}"}
 
+    def user_action(self, run, tool, args):
+        self.status(run)
+        if self.status_value != "running":
+            raise PiAgentError("CONFLICT", "session is not accepting moves")
+        self.calls.append(("user_action", tool, args))
+        return {"run": run, "tool": tool, "traceStep": 4, "isError": False}
+
 
 def test_agent_routes_delegate_to_pi_control(tmp_path):
     control = FakePiControl()
@@ -131,6 +138,40 @@ def test_agent_routes_delegate_to_pi_control(tmp_path):
         stopped = client.post(f"/api/agent/{control.run}/stop")
         assert stopped.status_code == 200 and stopped.json()["status"] == "stopping"
         assert client.post(f"/api/agent/{control.run}/stop").status_code == 409
+
+
+def test_the_human_can_move_the_world_through_the_notebook(tmp_path):
+    """The second half of collaboration needs a route, not only a kernel op.
+
+    A comment can only suggest; when the agent is stuck the human has to be
+    able to place the point, and the request must reach the same live kernel
+    the agent is working in.
+    """
+    control = FakePiControl()
+    with make_client(tmp_path, agent_client=control) as client:
+        moved = client.post(
+            f"/api/agent/{control.run}/action",
+            json={"tool": "set_var", "args": {"name": "T", "row": 0, "values": [0.9, 0.1]}},
+        )
+        assert moved.status_code == 200 and moved.json()["isError"] is False
+        assert (
+            "user_action",
+            "set_var",
+            {"name": "T", "row": 0, "values": [0.9, 0.1]},
+        ) in control.calls
+
+        sampled = client.post(f"/api/agent/{control.run}/action", json={"tool": "sample"})
+        assert sampled.status_code == 200
+        assert ("user_action", "sample", {}) in control.calls
+
+        assert client.post(f"/api/agent/{control.run}/action", json={"tool": "  "}).status_code == 422
+        assert client.post("/api/agent/no-such-run/action", json={"tool": "sample"}).status_code == 404
+
+        # A settled session has nothing live to move: the refusal must be an
+        # explicit conflict, not a move applied to nothing.
+        control.status_value = "done"
+        stale = client.post(f"/api/agent/{control.run}/action", json={"tool": "sample"})
+        assert stale.status_code == 409
 
 
 def test_pi_event_websocket_bridges_controller_events(tmp_path):

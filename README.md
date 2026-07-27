@@ -1,5 +1,7 @@
 # SimAgent
 
+[![CI](https://github.com/Muchmirul/SimAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/Muchmirul/SimAgent/actions/workflows/ci.yml)
+
 **Play with conjectures in a sandbox instead of fighting equations.**
 
 Working on math purely through equations is intimidating and bottlenecked —
@@ -282,6 +284,20 @@ installed (see *Manim without sudo* above for setup):
 .venv/bin/simagent solve circumcenter-in-tetrahedron --render-manim    # still frame
 .manim-env/bin/manim -qm runs/<dir>/scene_manim.py ConjectureScene     # rotating video
 ```
+
+## Running the tests
+
+```bash
+python -m pytest -q                       # the Python suite, offline
+SIMAGENT_LEAN=off python -m pytest -q     # the same suite with no Lean toolchain
+simagent bench                            # known-answer test, must stay 11/11
+(cd agent && PI_OFFLINE=1 npm run build && PI_OFFLINE=1 npm test)
+```
+
+The suite never calls a model or a network: agent behaviour is tested against a
+scripted faux provider. Lean is optional, so the suite is run both ways in CI;
+without it some verdicts are weaker and none are wrong. `simagent bench` needs
+Lean to reach 11/11.
 
 ## Honest scope
 

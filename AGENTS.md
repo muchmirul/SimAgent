@@ -67,7 +67,9 @@ output explains itself"). The first one governs the rest.
 
 ```bash
 .venv/bin/python -m pytest -q                 # Python suite (offline)
+SIMAGENT_LEAN=off .venv/bin/python -m pytest -q   # the no-toolchain path users have
 (cd agent && PI_OFFLINE=1 npm run build && PI_OFFLINE=1 npm test)  # pi suite
+.venv/bin/simagent bench                      # known-answer test, must stay 11/11
 .venv/bin/simagent list                       # bundled problems
 .venv/bin/simagent solve <id> [--trials N --seed S --render-manim]
 .venv/bin/simagent solve --conjecture "..."   # needs one authenticated pi model
@@ -76,6 +78,13 @@ output explains itself"). The first one governs the rest.
 .venv/bin/simagent web                        # reasoning notebook on :8642 (problem in, visual reasoning cells out)
 .venv/bin/simagent agent <id>                 # also accepts --spec FILE or --conjecture "..."
 ```
+
+`.github/workflows/ci.yml` runs those four on every push and pull request, in
+three jobs: the suite with no Lean at all (the machine a new user actually
+has), the suite plus `bench` with Lean 4.32.1 installed by elan, and the pi
+runtime built and tested offline. CI fails when no browser is present rather
+than letting `tests/test_ui_browser.py` skip, because a silent skip is how
+three UI bugs shipped green.
 
 Always use `.venv/bin/...` explicitly — the shell PATH may resolve python to a
 *different project's* venv (jacobian-conjecture). Install with

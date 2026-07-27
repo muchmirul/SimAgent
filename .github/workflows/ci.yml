@@ -1,0 +1,93 @@
+# CI runs the same checks the contributor rules ask for, in the same order.
+#
+# Three jobs, because the repo makes three separate promises and each can break
+# on its own:
+#
+#   python   Lean is genuinely OPTIONAL. This job has no toolchain at all, so
+#            it is the machine a new user actually has. Weaker verdicts are
+#            fine here; a crash or a wrong one is not.
+#   kernel   With Lean installed, the full suite plus `bench`, which is the
+#            known-answer test for the whole machine. Without Lean bench scores
+#            3/11 by design, so only this job can assert 11/11.
+#   pi       The TypeScript runtime, built and tested offline. PI_OFFLINE=1 and
+#            the faux provider mean no model is ever called.
+#
+# Tests must stay offline everywhere (AGENTS.md); the network is used only to
+# install toolchains.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  LEAN_VERSION: v4.32.1
+
+jobs:
+  python:
+    name: python suite (no Lean)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: the browser the UI test needs must be present
+        # tests/test_ui_browser.py skips when no Chromium is found. A skip that
+        # nobody notices is how three UI bugs shipped green, so fail loudly
+        # instead of quietly losing the only test that loads the real page.
+        run: command -v google-chrome
+      - run: python -m pytest -q
+        env:
+          SIMAGENT_LEAN: "off"
+
+  kernel:
+    name: python suite + bench (with Lean)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: install Lean via elan (no sudo, no Mathlib)
+        run: |
+          curl -sSf https://elan.lean-lang.org/elan-init.sh \
+            | sh -s -- -y --default-toolchain "leanprover/lean4:${LEAN_VERSION}"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: the kernel job is pointless without a working Lean
+        run: lean --version
+      - run: command -v google-chrome
+      - run: python -m pytest -q
+      - name: bench must stay 11/11
+        # The bundled claims are known-answer tests: a drop here means the
+        # machine changed its mind about a settled problem.
+        run: |
+          simagent bench | tee bench.txt
+          grep -q "pass rate: 11/11" bench.txt
+
+  pi:
+    name: pi runtime (TypeScript, offline)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    env:
+      PI_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test

@@ -253,5 +253,29 @@ def test_a_human_move_is_labelled_as_the_humans_on_the_page(tmp_path):
     assert 'id="movePlace"' in dom and 'id="moveSample"' in dom
 
 
+def test_every_control_in_the_page_is_wired_to_something():
+    """A button that exists and does nothing is one of this repo's real bugs.
+
+    The browser test above cannot reach the live-run state (that needs a model),
+    so this runs always and covers the half a settled-run DOM cannot: each id
+    the popover declares is looked up and bound in app.js.
+    """
+    static = Path(__file__).resolve().parents[1] / "src" / "simagent" / "web" / "static"
+    page = (static / "index.html").read_text()
+    script = (static / "app.js").read_text()
+
+    for control in ("movePlace", "moveSample", "moveVar", "moveIndex", "moveValues", "moveRow"):
+        assert f'id="{control}"' in page, f"{control} is missing from the page"
+        assert f"$('{control}')" in script, f"{control} is never read by app.js"
+
+    for button, call in (("movePlace", "sendMove('set_var')"), ("moveSample", "sendMove('sample')")):
+        assert f"$('{button}').onclick = () => {call}" in script, f"{button} is not wired"
+
+    # The move must go to the live kernel, not the standalone sandbox session.
+    assert "/action" in script and "refreshMoveRow" in script
+    # And the human's own step must be labelled wherever steps are drawn.
+    assert "by you, not the agent" in script
+
+
 if __name__ == "__main__":  # a quick manual check against a running server
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q", __file__]))

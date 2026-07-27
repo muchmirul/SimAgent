@@ -98,3 +98,55 @@ def test_proof_attempt_goes_through_the_same_route():
     assert out["method"] == "direct"
     assert pi.requests[0]["tool_name"] == "emit_proof_attempt"
     assert json.loads(json.dumps(pi.requests[0]["schema"]))["properties"]["method"]
+
+
+def test_no_vendor_sdk_is_a_dependency():
+    """The vendor lock has to be gone from the install, not just the imports.
+
+    A declared dependency on one provider's SDK says the tool needs that
+    provider, which is exactly the claim this change removes.
+    """
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    every = [*project["dependencies"], *sum(project.get("optional-dependencies", {}).values(), [])]
+    assert not any("anthropic" in item for item in every), every
+
+
+def test_the_client_the_formalizer_opens_itself_is_closed_again():
+    """A leaked service process outlives the command that started it."""
+    made = []
+
+    def fake_factory(_root):
+        client = FakePi([_triangle_claim_dump()])
+        made.append(client)
+        return client
+
+    import simagent.pi_agent as pi_agent
+
+    original = pi_agent.PiAgentClient
+    pi_agent.PiAgentClient = fake_factory
+    try:
+        llm.formalize("a conjecture", log=lambda *_: None)
+    finally:
+        pi_agent.PiAgentClient = original
+    assert len(made) == 1 and made[0].closed is True
+
+
+def test_a_specific_model_is_passed_straight_through():
+    pi = FakePi([_triangle_claim_dump()])
+    llm.formalize("x", client=pi, provider="somewhere", model="some-model",
+                  log=lambda *_: None)
+    assert pi.requests[0]["provider"] == "somewhere"
+    assert pi.requests[0]["model"] == "some-model"
+
+
+def test_formalize_gives_up_with_the_last_errors_named():
+    """A repair loop that ends in silence is one the caller cannot diagnose."""
+    broken = _triangle_claim_dump()
+    broken["measure"] = {"kind": "no_such_measure"}
+    pi = FakePi([dict(broken) for _ in range(3)])
+    with pytest.raises(llm.FormalizeError, match="no_such_measure"):
+        llm.formalize("x", client=pi, max_repairs=2, log=lambda *_: None)
+    assert len(pi.requests) == 3, "max_repairs=2 means three attempts in total"
