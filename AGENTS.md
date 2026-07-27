@@ -82,7 +82,10 @@ SIMAGENT_LEAN=off .venv/bin/python -m pytest -q   # the no-toolchain path users 
 `.github/workflows/ci.yml` runs those four on every push and pull request, in
 three jobs: the suite with no Lean at all (the machine a new user actually
 has), the suite plus `bench` with Lean 4.32.1 installed by elan, and the pi
-runtime built and tested offline. CI fails when no browser is present rather
+runtime built and tested offline. That third job still needs Python: the
+kernel-backed pi tests spawn `<repo>/.venv/bin/python -m
+simagent.kernel_transport` as a real subprocess, because the boundary is what
+they are testing. CI fails when no browser is present rather
 than letting `tests/test_ui_browser.py` skip, because a silent skip is how
 three UI bugs shipped green.
 
