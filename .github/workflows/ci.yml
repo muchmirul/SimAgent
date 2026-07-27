@@ -76,18 +76,33 @@ jobs:
   pi:
     name: pi runtime (TypeScript, offline)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: agent
     env:
       PI_OFFLINE: "1"
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: agent/package-lock.json
+      - name: install the Python kernel the pi tests drive
+        # Not a TypeScript-only job: every kernel-backed test spawns
+        # `<repo>/.venv/bin/python -m simagent.kernel_transport` as a real
+        # subprocess, which is the point (the boundary is what is under test).
+        # That path is hard-coded in kernel-client.ts, so CI builds the same
+        # .venv the contributor rules tell humans to use.
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
+      - name: the kernel must import, or every pi test fails far from the cause
+        run: .venv/bin/python -c "import simagent.kernel_transport"
       - run: npm ci
+        working-directory: agent
       - run: npm run build
+        working-directory: agent
       - run: npm test
+        working-directory: agent

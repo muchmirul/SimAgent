@@ -97,9 +97,13 @@ def test_ci_runs_every_suite_this_repo_depends_on():
     # The known-answer test for the whole machine.
     assert "simagent bench" in text and "pass rate: 11/11" in text
 
-    # The pi runtime, built and tested offline.
+    # The pi runtime, built and tested offline. It is not a TypeScript-only
+    # job: the kernel-backed tests spawn .venv/bin/python as a real subprocess,
+    # and CI failed once because that job had Node and nothing else.
     assert "npm ci" in text and "npm run build" in text and "npm test" in text
     assert 'PI_OFFLINE: "1"' in text
+    assert "python -m venv .venv" in text
+    assert 'import simagent.kernel_transport' in text
 
     # The UI test skips without a browser, and a silent skip is how UI bugs
     # shipped green before. CI must fail instead.
