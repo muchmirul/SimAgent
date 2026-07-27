@@ -102,6 +102,18 @@ async function dispatch(frame: RequestFrame): Promise<unknown> {
           : {},
     });
   }
+  if (op === "userAction") {
+    if (typeof frame.tool !== "string" || !frame.tool) {
+      throw new ControllerError("VALIDATION", "userAction needs a tool name");
+    }
+    return controller.userAction(String(frame.run ?? ""), {
+      tool: frame.tool,
+      args:
+        typeof frame.args === "object" && frame.args !== null
+          ? (frame.args as Record<string, unknown>)
+          : {},
+    });
+  }
   if (op === "stop") return controller.stop(String(frame.run ?? ""));
   if (op === "branch") {
     const request: BranchRunRequest = { step: Number(frame.step) };
@@ -110,6 +122,26 @@ async function dispatch(frame: RequestFrame): Promise<unknown> {
       request.target = frame.target as Record<string, unknown>;
     }
     return controller.branch(String(frame.run ?? ""), request);
+  }
+  if (op === "structured") {
+    for (const field of ["system", "prompt", "toolName", "toolDescription"] as const) {
+      if (typeof frame[field] !== "string" || !frame[field]) {
+        throw new ControllerError("VALIDATION", `structured needs a non-empty ${field}`);
+      }
+    }
+    if (typeof frame.schema !== "object" || frame.schema === null) {
+      throw new ControllerError("VALIDATION", "structured needs a schema object");
+    }
+    const request = {
+      system: frame.system as string,
+      prompt: frame.prompt as string,
+      toolName: frame.toolName as string,
+      toolDescription: frame.toolDescription as string,
+      schema: frame.schema as Record<string, unknown>,
+    } as Parameters<typeof controller.structured>[0];
+    if (typeof frame.provider === "string") request.provider = frame.provider;
+    if (typeof frame.model === "string") request.model = frame.model;
+    return controller.structured(request);
   }
   if (op === "models") return controller.listModels();
   if (op === "shutdown") {

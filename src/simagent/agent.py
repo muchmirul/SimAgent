@@ -23,10 +23,73 @@ from .visualize import mpl
 from .web.session import SandboxSession
 
 MAX_TOOL_CHARS = 2000
+MAX_RECALL_CHARS = 6000  # the memory tool carries a whole run, not one act
+RECALL_ACTS = 40  # most recent acts quoted in full; the rest are counted, not hidden
+COORD_PLACES = 6  # enough to re-issue a move exactly inside a unit-scale box
 
 # keep-best ordering for deductive attempts; mirrors proof.py's ladder so a
 # later failed attempt can never clobber a verified one
 _VERIFIED_RANK = {"sandbox+lean": 3, "lean": 2, "sandbox": 1, "none": 0}
+
+# Fields a truncated result must never drop: they carry the verdict or the
+# reason, which is the whole informational content of the reply.
+_PROTECTED_RESULT_KEYS = frozenset({
+    "holds", "margin", "error", "verdict", "certified", "proved", "verified_by",
+    "truncated", "dropped_fields", "note",
+})
+
+
+def _round_vars(vars: dict) -> dict:
+    """The free coordinates, rounded for reading.
+
+    Without these the model sees the margin but not where its own points are,
+    so every deliberate move is a position guessed off a rendered picture.
+    """
+    return {
+        name: np.round(np.asarray(value, dtype=float), COORD_PLACES).tolist()
+        for name, value in vars.items()
+    }
+
+
+def _fit(payload: dict, limit: int = MAX_TOOL_CHARS) -> str:
+    """Serialize a tool result, dropping whole fields rather than cutting text.
+
+    Slicing the JSON string mid-value hands the model unparseable text with no
+    sign that anything was removed, so a cut report reads as a complete one.
+    This drops the largest non-essential fields instead and NAMES them, so a
+    short reply says it is short.
+    """
+    text = json.dumps(payload, default=str)
+    if len(text) <= limit:
+        return text
+    kept = dict(payload)
+    dropped: list[str] = []
+    while len(text) > limit:
+        sizes = {
+            key: len(json.dumps(value, default=str))
+            for key, value in kept.items()
+            if key not in _PROTECTED_RESULT_KEYS
+        }
+        if not sizes:
+            break
+        biggest = max(sizes, key=lambda k: sizes[k])
+        kept.pop(biggest)
+        dropped.append(biggest)
+        text = json.dumps(
+            {**kept, "truncated": True, "dropped_fields": dropped}, default=str
+        )
+    if len(text) > limit:  # every remaining field is protected and still too long
+        return json.dumps(
+            {
+                **{k: v for k, v in kept.items() if k in _PROTECTED_RESULT_KEYS},
+                "truncated": True,
+                "dropped_fields": dropped,
+                "note": f"result exceeded {limit} characters; only verdict fields kept",
+            },
+            default=str,
+        )
+    return text
+
 
 SYSTEM = """You are a mathematician placed inside SimAgent, a 3D math sandbox.
 You are embodied: `look` shows you the current configuration as a rendered
@@ -80,6 +143,17 @@ The harness is the authority, and it is strict:
 - Your prose is recorded but proves nothing. Never claim more than the
   machinery verified.
 
+You are not alone in the world. A human collaborator can move it while you
+work: place a point, sample, or add a construction. You are told when that
+happens and the step is recorded under their name, not yours. Treat their move
+as evidence to look at, exactly like your own — check it, do not assume it is
+right, and say what you find.
+
+The harness also remembers for you: `recall` reads back the acts, margins,
+declared approaches and scored predictions this run journaled, so an early
+step that has left your context is not lost. It restates the record and
+nothing more.
+
 Work economically: look, form a hypothesis, test it. Call one tool per turn so
 every notebook cell is a safe branch point. When the matter is settled (or you
 are honestly stuck), call `finish` with a summary."""
@@ -100,7 +174,7 @@ TOOLS = [
     },
     {
         "name": "look",
-        "description": "Render the current configuration and see it (image + exact holds/margin status).",
+        "description": "Render the current configuration and see it (image + status: your exact free coordinates, holds, margin).",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -142,7 +216,7 @@ TOOLS = [
     },
     {
         "name": "check",
-        "description": "Exact numeric check of the current configuration (holds, margin, data).",
+        "description": "Numeric state of the current configuration: your free coordinates plus holds, margin and derived data.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -293,6 +367,11 @@ TOOLS = [
         },
     },
     {
+        "name": "recall",
+        "description": "Read back what this run recorded: the acts you took and their margins, the approaches you declared, which of your predictions came out right or wrong, the lowest and highest margin seen and where, what you constructed, and what the kernel has established so far. Restated from the journal — it holds no verdict and names no next move.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "finish",
         "description": "End the session with a summary of what was (and was not) established.",
         "input_schema": {
@@ -374,6 +453,7 @@ class AgentRun:
         self.views_taken = 0
         self.imaginings = 0
         self.open_expectations: list[dict] = []  # scored on later committed steps
+        self.scored_expectations: list[dict] = []  # settled ones, kept for `recall`
         self._expectation_seq = 0
         self._step_extra: dict | None = None
         self._step_image: str | None = None
@@ -396,13 +476,17 @@ class AgentRun:
 
     # -- tool dispatch -------------------------------------------------------
 
-    def dispatch(self, name: str, args: dict, *, tool_call_id: str | None = None):
+    def dispatch(self, name: str, args: dict, *, tool_call_id: str | None = None,
+                 actor: str = "model"):
         """Returns (content, is_error): content is str or a content-block list.
 
         ``tool_call_id`` is transport metadata only.  Carrying it into the
         transcript and trace lets an external runtime correlate its session
         entries with kernel actions without giving that runtime any verdict
         authority.
+
+        ``actor`` records who acted, because a human may move the world during
+        a run and an unattributed step would credit the model with the move.
         """
         self.seq += 1
         self._step_extra = None
@@ -428,6 +512,7 @@ class AgentRun:
                 {
                     "seq": self.seq,
                     "toolCallId": tool_call_id,
+                    "actor": actor,
                     "tool": name,
                     "args": args,
                     "result": result_text,
@@ -451,6 +536,11 @@ class AgentRun:
             if resolved:
                 self._step_extra = {**(self._step_extra or {}),
                                     "resolved_expectations": resolved}
+                # Kept so `recall` can show which predictions were wrong: being
+                # wrong is the one thing the model cannot notice on its own.
+                self.scored_expectations.extend(
+                    {**r, "at_step": self.trace.steps + 1} for r in resolved
+                )
         self.trace.record(
             tool_call_id=tool_call_id,
             tool=name,
@@ -464,12 +554,12 @@ class AgentRun:
             image=self._step_image,
             mode=self._step_mode,
             branch=self._step_branch,
+            actor=actor,
         )
         return content, is_error
 
     def _status(self) -> str:
-        check = self.session._check()
-        return json.dumps(check, default=str)[:MAX_TOOL_CHARS]
+        return _fit({"config": _round_vars(self.session.vars), **self.session._check()})
 
     def _t_plan(self, method: str, idea: str):
         m = Method(method)  # ValueError on junk -> the model sees and recovers
@@ -513,8 +603,8 @@ class AgentRun:
     def _t_measure(self):
         from .core.measure import measure_state
 
-        state = measure_state(self.session.vars, self.session._check())
-        return json.dumps(state, default=str)[:MAX_TOOL_CHARS]
+        state = measure_state(self.session.vars, self.session._check(), self.spec)
+        return _fit(state)
 
     def _t_view(self, kind: str, var: str | None = None, row: int = 0,
                 xi: int = 0, yi: int = 1, coord: int = 0, resolution: int = 48):
@@ -616,22 +706,22 @@ class AgentRun:
             "outcomes": outcomes,
             "note": "fork discarded — re-issue the ops for real if the picture looks right",
         }
-        content.append({"type": "text", "text": json.dumps(summary, default=str)[:MAX_TOOL_CHARS]})
+        content.append({"type": "text", "text": _fit(summary)})
         return content
 
     def _t_refine(self, steps: int = 300):
         r = self.session.refine(steps)
-        return json.dumps(r, default=str)
+        return _fit(r)
 
     def _t_hunt(self, trials: int = 1500):
         r = self.session.hunt(trials)
         self._step_extra = {"verdict": r.get("verdict"), "certified": r.get("certified")}
-        return json.dumps(r, default=str)[:MAX_TOOL_CHARS]
+        return _fit(r)
 
     def _t_exhaust(self):
         r = self.session.exhaust()
         self._step_extra = {"verdict": r.get("verdict"), "certified": r.get("certified")}
-        return json.dumps(r, default=str)[:MAX_TOOL_CHARS]
+        return _fit(r)
 
     def _t_certify(self):
         r = self.session.certify()
@@ -639,7 +729,7 @@ class AgentRun:
         if report is not None:
             self.certify_report = report
         self._step_extra = {"certified": r.get("certified"), "exact": r.get("exact")}
-        return json.dumps(r, default=str)[:MAX_TOOL_CHARS]
+        return _fit(r)
 
     def _keep_best_deductive(self, attempt) -> None:
         """Never let a later failed attempt clobber a verified one."""
@@ -671,12 +761,12 @@ class AgentRun:
             self._keep_best_deductive(proof)
         self._step_extra = {"method": "direct",
                             "verified_by": proof.verified_by if proof else "none"}
-        return json.dumps({
+        return _fit({
             "proved": proof is not None,
             "verified_by": proof.verified_by if proof else "none",
             "argument": proof.argument if proof else None,
             "notes": notes,
-        }, default=str)[:MAX_TOOL_CHARS]
+        })
 
     def _t_prove_by_cases(self, var: str, at: float, index: int = 0):
         from . import library
@@ -690,12 +780,12 @@ class AgentRun:
             self._keep_best_deductive(proof)
         self._step_extra = {"method": "cases",
                             "verified_by": proof.verified_by if proof else "none"}
-        return json.dumps({
+        return _fit({
             "proved": proof is not None,
             "verified_by": proof.verified_by if proof else "none",
             "argument": proof.argument if proof else None,
             "notes": notes,
-        }, default=str)[:MAX_TOOL_CHARS]
+        })
 
     def _t_prove_by_induction(self):
         from . import library
@@ -709,12 +799,12 @@ class AgentRun:
             self._keep_best_deductive(proof)
         self._step_extra = {"method": "induction",
                             "verified_by": proof.verified_by if proof else "none"}
-        return json.dumps({
+        return _fit({
             "proved": proof is not None,
             "verified_by": proof.verified_by if proof else "none",
             "argument": proof.argument if proof else None,
             "notes": notes,
-        }, default=str)[:MAX_TOOL_CHARS]
+        })
 
     def _t_submit_lean_proof(self, method: str, argument: str, lean_code: str | None = None):
         attempt = proof_mod.deductive_proof(
@@ -779,6 +869,54 @@ class AgentRun:
             e for e in self.open_expectations if all(r["id"] != e["id"] for r in resolved)
         ]
         return resolved
+
+    def _t_recall(self):
+        """Hand back what the kernel already recorded about this run.
+
+        A long session pushes its own early steps out of the model's context,
+        and the journal is write-only from the model's side, so without this
+        everything the harness carefully recorded is unreachable by the one who
+        needs it. Like `explain.py`, this RESTATES journaled state: it cannot
+        raise a stamp and it never names a next move.
+        """
+        from . import explain
+        from .core.journal import read_trace
+
+        acts = [
+            {"step": s["step"], "tool": s["tool"], "error": bool(s.get("error")),
+             "margin": (s.get("check") or {}).get("margin")}
+            for s in read_trace(self.out)["steps"]
+            if s.get("tool") and s.get("mode", "commit") == "commit"
+        ]
+        margins = [a for a in acts if a["margin"] is not None]
+        world = self.session.world
+        digest = {
+            "established": explain.result_rows(
+                self.spec, self.deductive, self.best_report(), self.session._check()
+            ),
+            "predictions": {
+                "scored": self.scored_expectations,
+                "still_open": self.open_expectations,
+            },
+            "approaches_declared": self.declared_plans,
+            "margin_seen": (
+                {
+                    "lowest": min(margins, key=lambda a: a["margin"]),
+                    "highest": max(margins, key=lambda a: a["margin"]),
+                }
+                if margins else None
+            ),
+            "constructed": [
+                {"name": e.name, "ctor": e.ctor, "args": list(e.args)}
+                for e in world.entities.values() if e.kind != "free"
+            ],
+            "steps_taken": self.trace.steps,
+            "acts_omitted": max(0, len(acts) - RECALL_ACTS),
+            "acts": acts[-RECALL_ACTS:],
+            "note": "restated from this run's journal; nothing here is a verdict "
+                    "and nothing here suggests a next move",
+        }
+        return _fit(digest, MAX_RECALL_CHARS)
 
     def _t_finish(self, summary: str):
         self.finished = True

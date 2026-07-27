@@ -36,6 +36,7 @@ const nb = {
   tracePoll: null,
   statusPoll: null,
   commentTarget: null,
+  lastVars: null,   // latest committed configuration, for the human's own move
 };
 
 function stopPolling() {
@@ -45,7 +46,7 @@ function stopPolling() {
 
 function resetNotebook() {
   stopPolling();
-  nb.run = null; nb.total = 0; nb.done = false; nb.job = false;
+  nb.run = null; nb.total = 0; nb.done = false; nb.job = false; nb.lastVars = null;
   nb.approach = null; nb.approachIdea = null; nb.finishSummary = null;
   nb.lanes = [];
   $('cells').replaceChildren();
@@ -115,6 +116,9 @@ function actLine(step) {
   if (step.tool === 'finish') argsText = '';
   else if (step.args && Object.keys(step.args).length) argsText = JSON.stringify(step.args);
   a.appendChild(el('span', null, step.tool ? `${step.tool}(${argsText})` : '— narrative only —'));
+  // Who acted. A human may move the world mid-run, and an unlabelled step
+  // would credit the model with a move it never made.
+  if (step.actor === 'user') a.appendChild(el('span', 'badge', '  by you, not the agent'));
   if (step.error) a.appendChild(el('span', 'err', '  ✗ error'));
   for (const [k, v] of Object.entries(step.extra ?? {})) {
     if (['view', 'expect', 'resolved_expectations', 'construct'].includes(k)) continue; // rendered as chips/badges in Out
@@ -445,8 +449,10 @@ async function pullTrace() {
     const cell = appendStep(s);
     nb.total = Math.max(nb.total, s.step);
     if (s.tool === 'finish' && s.args?.summary) nb.finishSummary = s.args.summary;
+    if (s.vars && s.mode !== 'imagine') nb.lastVars = s.vars;
     last = cell;
   }
+  refreshMoveRow();
   if (last && nearBottom()) last.scrollIntoView({ block: 'end', behavior: 'smooth' });
   if (tr.done && !nb.done) {
     nb.done = true;
@@ -482,7 +488,58 @@ function openComment(target) {
   $('commentText').value = '';
   $('commentMsg').textContent = '';
   $('commentPopover').style.display = 'block';
+  refreshMoveRow();
   $('commentText').focus();
+}
+
+// ---- the human's own hand in the world --------------------------------------
+// A comment can only suggest. When the agent is stuck the collaborator often
+// needs to just place the point, so these controls act on the live kernel and
+// the move is journalled under the user's name.
+function refreshMoveRow() {
+  const row = $('moveRow');
+  if (!row) return;
+  const names = Object.keys(nb.lastVars || {});
+  const live = Boolean(nb.run && nb.job && !nb.done && names.length);
+  row.style.display = live ? 'flex' : 'none';
+  if (!live) return;
+  const sel = $('moveVar');
+  if (sel.dataset.names === names.join(',')) return;
+  sel.textContent = '';
+  for (const name of names) {
+    const option = el('option', null, name);
+    option.value = name;
+    sel.appendChild(option);
+  }
+  sel.dataset.names = names.join(',');
+}
+
+async function sendMove(tool) {
+  if (!nb.run) return;
+  const msg = $('commentMsg');
+  let args = {};
+  if (tool === 'set_var') {
+    const name = $('moveVar').value;
+    const values = $('moveValues').value
+      .split(',').map((v) => Number(v.trim())).filter((v) => !Number.isNaN(v));
+    if (!name || !values.length) {
+      msg.textContent = 'pick a variable and give comma-separated numbers';
+      return;
+    }
+    args = { name, row: Number($('moveIndex').value) || 0, values };
+  }
+  $('movePlace').disabled = true;
+  $('moveSample').disabled = true;
+  try {
+    await api(`/api/agent/${encodeURIComponent(nb.run)}/action`, { tool, args });
+    msg.textContent = `your ${tool} is on the record; the agent has been told it was yours`;
+    await pullTrace().catch(() => {});
+  } catch (e) {
+    msg.textContent = `move failed: ${e.message}`;
+  } finally {
+    $('movePlace').disabled = false;
+    $('moveSample').disabled = false;
+  }
 }
 
 function closeComment() {
@@ -735,6 +792,8 @@ $('problemSel').addEventListener('change', () => { if ($('problemSel').value) $(
 $('commentSend').onclick = () => sendComment();
 $('commentBranch').onclick = () => branchFromTarget();
 $('commentCancel').onclick = closeComment;
+$('movePlace').onclick = () => sendMove('set_var');
+$('moveSample').onclick = () => sendMove('sample');
 
 // ------------------------------------------------------------- 3D overlay --
 // One lazy WebGL context; each open builds the clicked step's scene graph.

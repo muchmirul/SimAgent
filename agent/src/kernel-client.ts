@@ -44,6 +44,17 @@ export interface KernelToolResult {
   stateHash: string;
 }
 
+export interface KernelUserActionResult {
+  tool: string;
+  content: KernelContent[];
+  isError: boolean;
+  finished: boolean;
+  journalSeq: number;
+  traceStep: number;
+  state: Record<string, unknown>;
+  stateHash: string;
+}
+
 export interface KernelFinalizeResult extends KernelSnapshot {
   proof: unknown;
   report: unknown;
@@ -265,6 +276,20 @@ export class KernelClient {
       journalSeq: result.journalSeq,
       traceStep: result.traceStep,
       journalPath: result.journalPath,
+      state: result.state,
+      stateHash: result.stateHash,
+      finished: result.finished,
+    };
+    return result;
+  }
+
+  /** A human world move: journalled and hash-checked exactly like a tool call. */
+  async userAction(name: string, args: Record<string, unknown>): Promise<KernelUserActionResult> {
+    const result = await this.request<KernelUserActionResult>({ op: "userAction", name, args });
+    this.tip = {
+      journalSeq: result.journalSeq,
+      traceStep: result.traceStep,
+      journalPath: this.tip.journalPath,
       state: result.state,
       stateHash: result.stateHash,
       finished: result.finished,

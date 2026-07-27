@@ -107,6 +107,7 @@ const TOOL_SCHEMAS: Record<string, TSchema> = {
     },
     { additionalProperties: false },
   ),
+  recall: Empty(),
   finish: Type.Object({ summary: Type.String() }, { additionalProperties: false }),
 };
 

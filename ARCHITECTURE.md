@@ -24,7 +24,7 @@ between is dimension-blind.
 | **Entity** | particle | named, stable id; *free* (value in a Space) or *derived* (recipe over entities — coordinates are consequences, the CAD lesson) |
 | **Op** | force | THE only mutation channel (Blender lesson) = the agent's action vocabulary; a closed registry replaces exec'd code |
 | **Derive** | physical law | dependency graph; derived entities recompute when ancestors move |
-| **Measure** | observable | perception as calibrated compression: margins + qualitative predicates; never raw coordinate dumps |
+| **Measure** | observable | perception as calibrated compression: margins + qualitative predicates, each measure kind describing its own state through the registry's `qualitative` entry |
 | **Claim** | hypothesis under test | quantifier + free Spaces + recipe + a distinguished measure, all from closed registries |
 | **Journal** | worldline / lab notebook | dynamics first-class: state = replay(journal) = save format = undo = notebook feed; `imagine` branches = thought experiments; annotations = plan/expect/user_comment |
 | **View** | detector | output boundary: identity (d≤3), **field** (margin painted over a config-space slice, fixed diverging colormap centered at 0, zero-contour = the theorem's shape — the Ansys lesson), sweep, ghost, trajectory |
@@ -346,6 +346,16 @@ operation asserts that the complete kernel state hash is unchanged. Branches
 add a provenance annotation containing source run, step, journal sequence,
 and hash. Neither annotation kind is verdict material.
 
+The human may also move the world during a run, because a comment can only
+suggest and a stuck run often needs someone to place the point. That is a real
+state change, so it is not an annotation: `userAction` runs one of
+sample/set_var/nudge/construct through the same dispatch as a tool call and
+journals a `user_action` event with its own state hash, replayable like any
+other. Every trace step carries an `actor`, and the model is told at the same
+boundary that the move was not its own. The truth-making instruments
+(certify, hunt, exhaust, the proof tools) stay the model's alone: what counts
+as established is never the human's to assert either.
+
 The reasoning notebook polls the kernel trace and can also consume pi events
 through `/api/agent/<run>/stream`. A user can select a cell, thought, action,
 or equation line, or raycast-pick a 3D primitive, then comment or branch from
@@ -389,8 +399,9 @@ src/simagent/
                  incl. circumcenter-in-4simplex (the dimension-agnostic gate)
   visualize/     mpl.py (always-on PNG), manim_gen.py (generated ThreeDScene)
   agent.py       kernel-side tool state over one SandboxSession; no provider loop
-  kernel_transport.py  strict JSONL kernel bridge: tools, annotations, stop,
-                 hash-verified prefix replay, toolCallId correlation
+  kernel_transport.py  strict JSONL kernel bridge: tools, human world moves,
+                 annotations, stop, hash-verified prefix replay, toolCallId
+                 correlation
   pi_agent.py    thin client for the TypeScript pi control service
   spec.py        LEGACY exec'd-code contract (deprecated; loader only)
   trace.py       shim → core.journal

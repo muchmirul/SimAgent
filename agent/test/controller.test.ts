@@ -110,4 +110,62 @@ describe.sequential("P6 run controller", () => {
       await rm(root, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("routes a structured one-shot question through pi, with no kernel and no vision", async () => {
+    // Formalizing a conjecture is not an agent run, but it is still a model
+    // turn, so it belongs to pi like everything else. A text-only model must be
+    // accepted: this request never looks at a picture.
+    const root = await mkdtemp(join(tmpdir(), "simagent-structured-"));
+    const faux = fauxProvider({
+      provider: "simagent-structured-faux",
+      models: [{ id: "text-only", input: ["text"] }],
+    });
+    const modelRuntime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
+    });
+    modelRuntime.registerNativeProvider(faux.provider);
+    const controller = new RunController({ runsRoot: root, modelRuntime });
+    try {
+      let observed: Context | undefined;
+      faux.setResponses([
+        (context) => {
+          observed = JSON.parse(JSON.stringify(context)) as Context;
+          return fauxAssistantMessage(
+            fauxToolCall("emit_claim", { id: "made-up", quantifier: "forall" }),
+            { stopReason: "toolUse" },
+          );
+        },
+      ]);
+      const result = await controller.structured({
+        system: "you formalize claims",
+        prompt: "formalize: every triangle has three sides",
+        toolName: "emit_claim",
+        toolDescription: "return the claim",
+        schema: { type: "object", properties: { id: { type: "string" } } },
+      });
+      expect(result.output).toEqual({ id: "made-up", quantifier: "forall" });
+      expect(result.provider).toBe("simagent-structured-faux");
+      expect(result.model).toBe("text-only");
+      // The schema rides as the tool's parameters: that is what forces a shape
+      // across providers, rather than hoping for clean JSON in free text.
+      expect(observed?.tools?.map((tool) => tool.name)).toEqual(["emit_claim"]);
+      expect(observed?.systemPrompt).toBe("you formalize claims");
+
+      // A model that answers in prose instead must say so, not return nothing.
+      faux.setResponses([fauxAssistantMessage(fauxText("I would rather explain it"))]);
+      await expect(
+        controller.structured({
+          system: "s",
+          prompt: "p",
+          toolName: "emit_claim",
+          toolDescription: "d",
+          schema: { type: "object" },
+        }),
+      ).rejects.toThrow(/returned no emit_claim call.*rather explain/s);
+    } finally {
+      await controller.shutdown();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

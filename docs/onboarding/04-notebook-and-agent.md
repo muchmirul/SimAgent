@@ -47,8 +47,8 @@ node agent/dist/cli.js auth-check --provider openai-codex --model gpt-5.6-sol
 2. Pick a **thinking** level. Higher is slower and uses more account quota.
 3. Set **max turns**. Forty is a reasonable start.
 4. In the `In [ ]:` cell, choose a bundled problem, or type a conjecture in plain
-   words. Free text is formalized by Claude first, which needs
-   `ANTHROPIC_API_KEY` or an `ant auth login` profile. Without Claude access,
+   words. Free text is formalized first, which needs
+   one model pi has authenticated. Without any authenticated model,
    use a bundled problem.
 5. Press **Run agent**.
 
@@ -179,7 +179,7 @@ Pressing **Run agent** starts a chain of four processes. It is worth seeing
 once, because the shape of the chain is the reason a model cannot fake a result.
 
 1. The **browser** posts the problem to the notebook server.
-2. The **notebook server**, Python and FastAPI, formalizes free text with Claude
+2. The **notebook server**, Python and FastAPI, formalizes free text with a pi-routed model
    if you typed a sentence, then hands the claim to the pi service through a
    thin client.
 3. The **pi service**, TypeScript, picks the model once, opens a session whose

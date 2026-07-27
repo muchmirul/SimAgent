@@ -10,7 +10,6 @@ dependencies = [
     "scipy>=1.11",
     "sympy>=1.12",
     "matplotlib>=3.8",
-    "anthropic>=0.116",
     "fastapi>=0.110",
     "uvicorn>=0.29",
 ]

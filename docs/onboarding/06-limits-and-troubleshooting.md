@@ -142,8 +142,8 @@ line of the error while the full traceback stays in the terminal.
 
 ### Typing a conjecture in plain words fails
 
-That path calls Claude to formalize the sentence, so it needs
-`ANTHROPIC_API_KEY` or an `ant auth login` profile. Without it, use a bundled
+That path asks a pi-routed model to formalize the sentence, so it needs
+one model pi has authenticated. Without one, use a bundled
 problem, or write the spec JSON yourself and pass `--spec`.
 
 If the formalizer runs but the claim is rejected, that is the validator working.

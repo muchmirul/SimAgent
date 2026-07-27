@@ -46,7 +46,9 @@ def _resolve_spec(args) -> ProblemSpec:
     if args.conjecture:
         from .llm import formalize
 
-        return formalize(args.conjecture, model=args.model)
+        return formalize(
+            args.conjecture, model=args.model, provider=getattr(args, "provider", None)
+        )
     raise SystemExit("give a bundled problem id, --spec spec.json, or --conjecture 'text' (see `simagent list`)")
 
 
@@ -95,7 +97,7 @@ def _cmd_agent(args) -> int:
     elif args.conjecture:
         from .llm import formalize
 
-        spec = formalize(args.conjecture)
+        spec = formalize(args.conjecture, model=args.model, provider=args.provider)
         source_args = []
     else:
         raise SystemExit(
@@ -203,7 +205,7 @@ def _cmd_web(args) -> int:
 def _cmd_formalize(args) -> int:
     from .llm import formalize
 
-    spec = formalize(args.text, model=args.model)
+    spec = formalize(args.text, model=args.model, provider=args.provider)
     out = args.out or f"{spec.id}.spec.json"
     spec.save(out)
     print(f"spec written: {out}")
@@ -227,13 +229,14 @@ def main(argv=None) -> int:
     s = sub.add_parser("solve", help="run the full pipeline on a conjecture")
     s.add_argument("problem", nargs="?", help="bundled problem id (see `simagent list`)")
     s.add_argument("--spec", help="path to a spec.json (e.g. from `simagent formalize`)")
-    s.add_argument("--conjecture", help="natural-language conjecture (uses the Claude API)")
+    s.add_argument("--conjecture", help="natural-language conjecture (formalized by a pi-routed model)")
     s.add_argument("--trials", type=int, default=2000)
     s.add_argument("--seed", type=int, default=0)
     s.add_argument("--out", help="output directory (default runs/<id>-seed<seed>)")
     s.add_argument("--render-manim", action="store_true", help="render the Manim scene (needs manim)")
     s.add_argument("--llm-proof", action="store_true", help="ask the LLM for a proof sketch (uses the API)")
-    s.add_argument("--model", help="Claude model id (default claude-opus-4-8; env SIMAGENT_MODEL)")
+    s.add_argument("--provider", help="pi provider id for formalization (requires --model)")
+    s.add_argument("--model", help="pi model id (default: pi's first authenticated model)")
     s.set_defaults(fn=_cmd_solve)
 
     pl = sub.add_parser("play", help="interactive sandbox REPL with a live-updating 3D preview")
@@ -269,10 +272,13 @@ def main(argv=None) -> int:
     w.add_argument("--no-browser", action="store_true")
     w.set_defaults(fn=_cmd_web)
 
-    f = sub.add_parser("formalize", help="conjecture text -> validated spec.json (uses the Claude API)")
+    f = sub.add_parser(
+        "formalize", help="conjecture text -> validated spec.json (via a pi-routed model)"
+    )
     f.add_argument("text")
     f.add_argument("--out", help="output path (default <id>.spec.json)")
-    f.add_argument("--model")
+    f.add_argument("--provider", help="pi provider id (requires --model)")
+    f.add_argument("--model", help="pi model id (default: pi's first authenticated model)")
     f.set_defaults(fn=_cmd_formalize)
 
     args = p.parse_args(argv)

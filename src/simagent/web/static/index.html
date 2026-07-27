@@ -186,6 +186,8 @@
   #commentTarget { color: var(--in); font-size: 11px; overflow-wrap: anywhere; margin-bottom: 7px; }
   #commentText { width: 100%; min-height: 72px; resize: vertical; }
   #commentMsg { color: var(--dim); font-size: 11.5px; flex: 1; }
+  #moveRow { margin-bottom: 7px; }
+  #moveLabel { color: var(--dim); font-size: 11.5px; }
 
   /* ---- motion: a trace should arrive, not blink into place ----------------
      Every animation is short and one-directional. The point is to show that a
@@ -324,6 +326,16 @@
 <div id="commentPopover">
   <div class="mono" id="commentTarget"></div>
   <textarea id="commentText" placeholder="Steer the agent. This is narrative only and can never certify a claim."></textarea>
+  <div class="runrow" id="moveRow" style="display:none">
+    <span id="moveLabel">or move the world yourself:</span>
+    <select id="moveVar" title="which free variable to move"></select>
+    <input id="moveIndex" type="number" min="0" step="1" value="0" style="width:54px"
+           title="which row of that variable">
+    <input id="moveValues" placeholder="0.9, 0.1" style="flex:1"
+           title="comma-separated coordinates for that row">
+    <button id="movePlace" title="place this row yourself; the agent is told the move was yours">place</button>
+    <button id="moveSample" title="draw a new random configuration yourself">sample</button>
+  </div>
   <div class="runrow">
     <button id="commentSend">send comment</button>
     <button id="commentBranch" title="rewind to this cell and continue in a new pi session">branch with comment</button>

@@ -184,10 +184,15 @@ class Journal:
         image: str | None = None,
         mode: str = "commit",
         branch: dict | None = None,
+        actor: str = "model",
     ) -> dict:
         """One step. mode="imagine" journals a thought experiment: the entry
         carries the *hypothetical* scene/check/vars, but the diff baseline
-        does NOT advance — imagination never shifts the mainline."""
+        does NOT advance — imagination never shifts the mainline.
+
+        ``actor`` says WHO acted. A human can move the world mid-run, and a
+        step with no author reads as the model's own move, which would make
+        the trace lie about who did what."""
         if mode not in ("commit", "imagine"):
             raise ValueError(f"unknown journal mode {mode!r}")
         self.steps += 1
@@ -198,6 +203,7 @@ class Journal:
             "thought": self._pending or None,
             "toolCallId": tool_call_id,
             "mode": mode,
+            "actor": actor,
             "tool": tool,
             "args": args,
             "error": error,

@@ -11,13 +11,14 @@ Protocol (one response for every request)::
     {"id":"1", "op":"describe"}
     {"id":"2", "op":"call", "toolCallId":"call-7",
      "name":"look", "args":{}}
-    {"id":"3", "op":"annotate", "kind":"user_comment", "payload":{...}}
-    {"id":"4", "op":"stop", "summary":"stopped by the user"}
-    {"id":"5", "op":"snapshot"}
-    {"id":"6", "op":"finalize"}
+    {"id":"3", "op":"userAction", "name":"set_var", "args":{...}}
+    {"id":"4", "op":"annotate", "kind":"user_comment", "payload":{...}}
+    {"id":"5", "op":"stop", "summary":"stopped by the user"}
+    {"id":"6", "op":"snapshot"}
+    {"id":"7", "op":"finalize"}
 
-The append-only ``kernel-journal.jsonl`` stores every tool call, thought,
-annotation, and stop boundary. Tool calls keep the unchanged Pi ``toolCallId``;
+The append-only ``kernel-journal.jsonl`` stores every tool call, human world
+move, thought, annotation, and stop boundary. Tool calls keep the unchanged Pi ``toolCallId``;
 every event carries a hash of the resulting kernel state. A new transport can
 replay a journal prefix, and replay fails closed if any state hash differs.
 """
@@ -39,9 +40,12 @@ from .library import get as get_bundled
 from .spec import ProblemSpec
 
 JOURNAL_FILE = "kernel-journal.jsonl"
-JOURNAL_VERSION = 2
+JOURNAL_VERSION = 3  # 3 adds user_action events and actor attribution
 
 _ANNOTATION_KINDS = frozenset({"user_comment", "provenance"})
+# World moves a human may make mid-run. Deliberately excludes every instrument
+# that can establish something: what counts as proved stays the model's call.
+_USER_TOOLS = frozenset({"sample", "set_var", "nudge", "construct"})
 _THOUGHT_KINDS = frozenset({"text", "thinking", "user"})
 
 
@@ -127,6 +131,7 @@ def _state(run: AgentRun) -> dict[str, Any]:
             "certifyReport": run.certify_report,
             "declaredPlans": run.declared_plans,
             "openExpectations": run.open_expectations,
+            "scoredExpectations": run.scored_expectations,
             "expectationSequence": run._expectation_seq,
             "artifactCounters": {
                 "dispatch": run.seq,
@@ -204,7 +209,9 @@ def _read_records(path: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     if not records or records[0].get("event") != "header":
         raise KernelReplayError("journal has no valid header")
     return records[0], [
-        r for r in records[1:] if r.get("event") in {"call", "note", "annotation", "stop"}
+        r
+        for r in records[1:]
+        if r.get("event") in {"call", "user_action", "note", "annotation", "stop"}
     ]
 
 
@@ -330,6 +337,54 @@ class KernelTransport:
             "journalPath": str(self.path.resolve()),
             "state": state,
             "stateHash": digest,
+        }
+
+    def user_action(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Let the HUMAN move the world during a run, on the record.
+
+        This is the other half of collaboration: a comment can only suggest,
+        while a stuck run often needs someone to just place the point. It is a
+        real world change, so it cannot ride the annotation path (which must
+        not alter state); it is a journalled, replayable, hash-checked event
+        like any tool call, attributed to ``user`` so the trace never credits
+        the model with a move it did not make. Only world moves are allowed:
+        truth-making instruments stay the model's to call.
+        """
+        if self._closed:
+            raise RuntimeError("kernel transport is finalized")
+        if name not in _USER_TOOLS:
+            raise ValueError(
+                f"tool {name!r} is not a human world move; allowed: {sorted(_USER_TOOLS)}"
+            )
+        if not isinstance(args, dict):
+            raise ValueError("tool args must be an object")
+        self.journal_seq += 1
+        content, is_error = self.run.dispatch(
+            name, args, tool_call_id=f"user-{self.journal_seq}", actor="user"
+        )
+        state = _state(self.run)
+        digest = _state_hash(state)
+        self._write(
+            {
+                "event": "user_action",
+                "seq": self.journal_seq,
+                "tool": name,
+                "args": args,
+                "result": _result_summary(content),
+                "isError": is_error,
+                "state": state,
+                "stateHash": digest,
+            }
+        )
+        return {
+            "tool": name,
+            "content": _transport_content(content),
+            "isError": is_error,
+            "journalSeq": self.journal_seq,
+            "traceStep": self.run.trace.steps,
+            "state": state,
+            "stateHash": digest,
+            "finished": self.run.finished,
         }
 
     def note_thought(self, text: str, kind: str = "text") -> dict[str, Any]:
@@ -461,6 +516,12 @@ class KernelTransport:
                 )
                 if result["isError"] != bool(entry.get("isError")):
                     raise KernelReplayError(f"replay error status diverged at event {seq}")
+            elif event == "user_action":
+                result = self.user_action(
+                    str(entry.get("tool") or ""), dict(entry.get("args") or {})
+                )
+                if result["isError"] != bool(entry.get("isError")):
+                    raise KernelReplayError(f"replay error status diverged at event {seq}")
             elif event == "note":
                 result = self.note_thought(
                     str(entry.get("text") or ""), str(entry.get("kind") or "")
@@ -525,6 +586,10 @@ def serve(transport: KernelTransport, stdin: TextIO = sys.stdin, stdout: TextIO 
                     result = transport.describe()
                 elif op == "snapshot":
                     result = transport.snapshot()
+                elif op == "userAction":
+                    result = transport.user_action(
+                        request.get("name"), request.get("args") or {}
+                    )
                 elif op == "call":
                     result = transport.call_tool(
                         request.get("toolCallId"), request.get("name"), request.get("args") or {}

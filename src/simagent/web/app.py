@@ -187,6 +187,11 @@ class AgentCommentBody(BaseModel):
     target: dict
 
 
+class AgentActionBody(BaseModel):
+    tool: str
+    args: dict = {}
+
+
 class AgentBranchBody(BaseModel):
     step: int
     comment: str | None = None
@@ -623,6 +628,22 @@ def create_app(
             raise HTTPException(422, "comment text must be non-empty")
         try:
             return control().comment(run, body.text.strip(), body.target)
+        except Exception as exc:
+            control_error(exc)
+
+    @app.post("/api/agent/{run}/action")
+    def agent_action(run: str, body: AgentActionBody) -> dict:
+        """Move the world yourself while the agent is running.
+
+        The other half of collaboration: a comment suggests, this places the
+        point. The kernel journals it under the user's name and the model is
+        told, so neither the trace nor the model mistakes it for the model's
+        own move.
+        """
+        if not body.tool.strip():
+            raise HTTPException(422, "action needs a tool name")
+        try:
+            return control().user_action(run, body.tool.strip(), body.args)
         except Exception as exc:
             control_error(exc)
 

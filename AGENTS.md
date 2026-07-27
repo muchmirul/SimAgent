@@ -70,7 +70,7 @@ output explains itself"). The first one governs the rest.
 (cd agent && PI_OFFLINE=1 npm run build && PI_OFFLINE=1 npm test)  # pi suite
 .venv/bin/simagent list                       # bundled problems
 .venv/bin/simagent solve <id> [--trials N --seed S --render-manim]
-.venv/bin/simagent solve --conjecture "..."   # needs Claude API auth
+.venv/bin/simagent solve --conjecture "..."   # needs one authenticated pi model
 .venv/bin/simagent formalize "..." --out spec.json
 .venv/bin/simagent play <id>                  # interactive REPL; preview.png re-renders per command
 .venv/bin/simagent web                        # reasoning notebook on :8642 (problem in, visual reasoning cells out)
@@ -181,13 +181,23 @@ Each module is described once, here. State it nowhere else.
 - `spec.py` is the deprecated legacy compatibility path. It still compiles old
   exec-code disk specs; `ProblemSpec.load` routes native `claim/1` JSON to
   `core.claim`. Bundled and LLM-created problems use Claims.
-- `llm.py` is the Claude formalizer (`messages.parse` structured output, model
-  `claude-opus-4-8`, adaptive thinking) with a `validate_claim()` repair loop.
-  Its closed-vocabulary prompt is generated from registry `doc` strings.
+- `llm.py` is the formalizer. It asks whatever model pi routes, through the
+   same control service agent runs use (`structured` op → `_ask`), so the
+   front door is not pinned to one vendor while the main hall is open to any.
+   No default model id: with none given pi hands over its first authenticated
+   model, and `--provider/--model` picks one. The answer shape is forced by a
+   single tool whose parameters ARE the schema, and a `validate_claim()`
+   repair loop quotes each failure back. Its closed-vocabulary prompt is
+   generated from registry `doc` strings.
 - `pipeline.py` orchestrates one full run (spec → search → certify → visualize
   → answer) into a self-describing directory: spec.json, report.json,
   preview.png, scene.json, scene_manim.py, answer.md, answer.tex,
   conjecture.lean, optional proof_sketch.md and media/.
+- `core/measure.py` is perception as compression, and each measure kind
+   describes its OWN state through a `qualitative` entry in the MEASURES
+   registry (min_coord speaks about faces of a simplex, expr about the terms
+   of its margin). A measure with no describer would leave the model only the
+   margin number it already had.
 - `explain.py` turns kernel state into plain English: `result_rows()` and
   `result_summary()` for the end of a run, `step_line()` for one state of a
   progression. Reads Proof/SearchReport objects or the JSON they were saved
@@ -219,14 +229,30 @@ Each module is described once, here. State it nowhere else.
   (the HTTP control service), `cli.ts`, `index.ts`.
 - `pi_agent.py` is the web app's thin Python client for that service. It
   transports commands only; no response from it can mint a verdict.
-- Closed agent tools (20): plan, look, sample, set_var, nudge, check, measure,
+- Closed agent tools (21): plan, look, sample, set_var, nudge, check, measure,
   view, imagine, refine, hunt, exhaust, certify, sum_of_squares,
   prove_by_cases, prove_by_induction, submit_lean_proof, construct, expect,
-  finish. TypeScript exposes no pi coding tools and no discovered resources.
+  recall, finish. TypeScript exposes no pi coding tools and no discovered
+  resources. `recall` is the memory the harness owes: compaction is off (it
+  would break branch hashes), so without it a long run's own journal is
+  unreachable by the model that wrote it. It RESTATES journalled state via
+  `explain.result_rows` and can neither stamp nor advise.
+- Every model-facing result goes through `agent._fit`, which drops whole
+  fields and NAMES them rather than slicing JSON mid-value: a cut reply that
+  cannot say it was cut reads as a complete one. `_status` carries the free
+  coordinates, because without them the model can read the margin but not
+  where its own points are, and every deliberate move becomes a guess read off
+  a PNG.
 - Every run writes `trace.jsonl` (thought, action, scene, equation, diff
   cells) and `kernel-journal.jsonl` (replayable calls and state hashes).
   Comments enter pi with `session.steer()` and are journaled as
   `user_comment`; the annotation must preserve the full kernel state hash.
+  A human may also MOVE the world mid-run (`userAction` op → journal event
+  `user_action`, tools limited to sample/set_var/nudge/construct): a comment
+  can only suggest, and a stuck run often needs someone to place the point.
+  It changes state, so it is a replayable hash-checked event rather than an
+  annotation, every trace step carries an `actor`, and the model is told in
+  the same boundary so it never mistakes the move for its own.
   Branches copy a settled pi conversation prefix, replay the matching kernel
   journal prefix, verify the exact hash, and add provenance. Product turns
   accept one kernel action, which is what makes tool cells settled branch
@@ -450,3 +476,6 @@ Rules:
   along the way is its own row, because that is usually the row that matters.
 - Say plainly when a change buys nothing yet and is groundwork.
 - The table comes BEFORE the prose, so the reader can stop after it.
+
+if im typing "-discuss" always answer with explaning using purely english in simple explanatory paragraph with step by step progression
+if im typing "-ss" always answer with explaning using purely english in simple explanatory short sentences with step by step progression

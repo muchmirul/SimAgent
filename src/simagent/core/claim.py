@@ -17,6 +17,7 @@ Only the truth layer decides claims; a Claim carries no verdict state.
 """
 from __future__ import annotations
 
+import ast
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,8 +94,89 @@ def _measure_expr(env: dict, recipe: list[dict], params: dict) -> NativeCheckRes
     return NativeCheckResult(holds=margin > 0, margin=margin, data=data)
 
 
+def _additive_terms(node, sign: int = 1):
+    """Split an expression into its top-level signed terms, for description."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
+        yield from _additive_terms(node.left, sign)
+        yield from _additive_terms(
+            node.right, sign if isinstance(node.op, ast.Add) else -sign
+        )
+    else:
+        yield ast.unparse(node), node, sign
+
+
+def _describe_env(vars: dict, check: dict) -> dict:
+    env = {k: np.asarray(v, dtype=float) for k, v in vars.items()}
+    for name, value in (check.get("data") or {}).items():
+        env[name] = np.asarray(value, dtype=float)
+    return env
+
+
+def _qualitative_expr(vars: dict, check: dict, params: dict) -> list[str]:
+    """Each top-level term of the margin, evaluated.
+
+    The total alone says the claim fails but not which part of the expression
+    carried it there; the terms are computed facts, so reporting them is
+    perception rather than advice.
+    """
+    try:
+        tree = expr.parse(params["margin"])
+    except expr.ExprError:
+        return []
+    env, parts = _describe_env(vars, check), []
+    for label, node, sign in _additive_terms(tree):
+        try:
+            value = sign * float(expr.evaluate(node, env))
+        except Exception:  # noqa: BLE001 - an undescribable term is simply omitted
+            continue
+        parts.append(f"{label} contributes {value:+.4g}")
+    if len(parts) < 2:
+        return []
+    return [f"margin = {params['margin']}, term by term: " + "; ".join(parts)]
+
+
+def _qualitative_min_coord(vars: dict, check: dict, params: dict) -> list[str]:
+    of = params["of"]
+    w = np.asarray((check.get("data") or {}).get(of) or [], dtype=float).ravel()
+    if w.size == 0:
+        return []
+    k = int(np.argmin(w))
+    if float(w.min()) > 0:
+        return [
+            f"the point is INSIDE the simplex (all {w.size} coordinates of {of} "
+            f"positive; smallest is {of}[{k}] = {w.min():.4g})"
+        ]
+    return [
+        f"the point is OUTSIDE the simplex — beyond the face opposite vertex {k} "
+        f"({of}[{k}] = {w.min():.4g} < 0)"
+    ]
+
+
+def _qualitative_sum_odds(vars: dict, check: dict, params: dict) -> list[str]:
+    data = check.get("data") or {}
+    n, total, square = data.get("n"), data.get("sum_of_first_n_odds"), data.get("n_squared")
+    if n is None:
+        return []
+    verb = "equals" if total == square else "differs from"
+    return [
+        f"at n = {n} the sum of the first {n} odd numbers is {total} and n squared "
+        f"is {square}, so the sum {verb} n squared"
+    ]
+
+
+def _qualitative_euler(vars: dict, check: dict, params: dict) -> list[str]:
+    data = check.get("data") or {}
+    if data.get("chi") is None:
+        return []
+    return [
+        f"the convex hull has V = {data['V']} vertices, E = {data['E']} edges and "
+        f"F = {data['F']} faces, so V - E + F = {data['chi']}"
+    ]
+
+
 MEASURES = {
     "expr": {"fn": _measure_expr, "params": ("margin",),
+             "qualitative": _qualitative_expr,
              "doc": "margin = a rational arithmetic expression over the free "
                     "entities and recipe results, written so margin > 0 means "
                     "the property holds (e.g. for 'lhs >= rhs' write "
@@ -103,11 +185,14 @@ MEASURES = {
                     "P[0]; this is THE general measure — prefer it over a "
                     "problem-specific one"},
     "min_coord": {"fn": _measure_min_coord, "params": ("of",),
+                  "qualitative": _qualitative_min_coord,
                   "doc": "margin = smallest coordinate of a derived vector "
                          "(e.g. barycentric weights: positive iff inside)"},
     "sum_of_first_odds_equals_square": {"fn": _measure_sum_odds_square, "params": ("of",),
+                                        "qualitative": _qualitative_sum_odds,
                                         "doc": "discrete: sum of first n odds == n^2"},
     "euler_characteristic": {"fn": _measure_euler_characteristic, "params": ("of",),
+                             "qualitative": _qualitative_euler,
                              "doc": "discrete: V - E + F == 2 on the 3D convex hull"},
 }
 

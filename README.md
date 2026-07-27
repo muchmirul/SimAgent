@@ -116,7 +116,7 @@ Opens `http://localhost:8642` — a Jupyter-style notebook whose output is not
 text but the agent's **visual chain of thought**:
 
 - **In [ ]:** the problem — pick a bundled conjecture or type one in plain
-  words (free text is formalized by Claude into a sandbox-validated spec).
+  words (free text is formalized by a pi-routed model into a sandbox-validated spec).
 - Press **Run agent**: an embodied agent session starts server-side, and one
   cell streams in per reasoning step — the model's *thinking*, the *act* it
   chose (`set_var`, `hunt`, `certify`, …), the **picture** of the scene after
@@ -224,7 +224,7 @@ translation, and diff. Select text or double-click a thought, action, equation,
 or cell to comment. In the 3D overlay, click a point or primitive to comment on
 that object. Use **branch from here** to continue from that exact state.
 
-## The LLM stages (need Claude API access)
+## The LLM stages (need one authenticated pi model)
 
 ```bash
 # natural language -> validated spec (structured output + sandbox-checked repair loop)
@@ -234,9 +234,12 @@ that object. Use **branch from here** to continue from that exact state.
 .venv/bin/simagent solve --conjecture "..." --llm-proof
 ```
 
-Auth resolves from `ANTHROPIC_API_KEY` or an `ant auth login` profile. Default
-model is `claude-opus-4-8` (override with `--model` or `SIMAGENT_MODEL`). The
-formalizer's output is never trusted blindly: its native Claim JSON is checked
+The request goes to whatever model pi routes, through the same control service
+an agent run uses, so the front door is not pinned to one vendor while the main
+hall is open to any. Pi owns auth: with no `--provider/--model` it hands over
+its first authenticated model, and giving both picks one. No vision is required
+here, since formalizing reads words and writes JSON. The formalizer's output is
+never trusted blindly: its native Claim JSON is checked
 against the closed registries and smoke-tested in the sandbox, and validation
 errors are fed back for repair before the claim is accepted.
 

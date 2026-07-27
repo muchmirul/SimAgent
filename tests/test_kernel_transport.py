@@ -204,3 +204,61 @@ def test_jsonl_server_returns_one_correlated_response_per_request(tmp_path):
     assert [response["id"] for response in responses] == ["describe-id", "call-id", "final-id"]
     assert all(response["ok"] for response in responses)
     assert responses[1]["result"]["toolCallId"] == "pi-tool-id"
+
+
+# -- the human's own move ------------------------------------------------------
+
+
+def test_user_action_is_journalled_attributed_and_replayable(tmp_path):
+    """A human may move the world mid-run; the record must say it was them."""
+    source = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "source-user")
+    source.call_tool("pi-call-sample", "sample", {"seed": 1})
+    result = source.user_action("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    source.call_tool("pi-call-check", "check", {})
+    assert result["isError"] is False
+    expected = source.snapshot()
+
+    steps = read_trace(tmp_path / "source-user")["steps"]
+    actors = [(s["tool"], s.get("actor")) for s in steps if s.get("tool")]
+    assert actors == [("sample", "model"), ("set_var", "user"), ("check", "model")]
+
+    branch = KernelTransport(
+        get("circumcenter-in-triangle"),
+        tmp_path / "branch-user",
+        replay_journal=source.path,
+        replay_through=3,
+    )
+    try:
+        assert branch.snapshot()["stateHash"] == expected["stateHash"]
+    finally:
+        branch.finalize()
+        source.finalize()
+
+
+def test_user_action_refuses_the_truth_making_instruments(tmp_path):
+    """The human can move the world; what counts as proved stays the model's."""
+    transport = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "user-limits")
+    try:
+        for tool in ("certify", "hunt", "exhaust", "sum_of_squares", "submit_lean_proof"):
+            with pytest.raises(ValueError, match="not a human world move"):
+                transport.user_action(tool, {})
+    finally:
+        transport.finalize()
+
+
+def test_user_action_op_is_served_over_the_wire(tmp_path):
+    transport = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "user-wire")
+    stdin = io.StringIO(
+        json.dumps({"id": "1", "op": "userAction", "name": "sample", "args": {"seed": 4}})
+        + "\n"
+        + json.dumps({"id": "2", "op": "userAction", "name": "certify", "args": {}})
+        + "\n"
+        + json.dumps({"id": "3", "op": "finalize"})
+        + "\n"
+    )
+    stdout = io.StringIO()
+    serve(transport, stdin=stdin, stdout=stdout)
+    replies = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert replies[0]["ok"] is True and replies[0]["result"]["tool"] == "sample"
+    assert replies[1]["ok"] is False  # certify is not a human world move
+    assert replies[2]["ok"] is True

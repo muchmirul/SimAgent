@@ -213,5 +213,45 @@ def test_look_images_older_than_the_renderer_are_flagged(tmp_path):
             )
 
 
+@pytest.mark.skipif(_chrome() is None, reason="no headless Chromium available")
+def test_a_human_move_is_labelled_as_the_humans_on_the_page(tmp_path):
+    """A move the human made must not read as one the agent made.
+
+    The kernel attributes it; this asserts the attribution survives all the way
+    to the rendered cell, which is the only place the reader ever sees it.
+    """
+    import uvicorn
+
+    from simagent.web import create_app
+
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path / "agent-shared")
+    run.dispatch("look", {})
+    run.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]}, actor="user")
+    run.dispatch("finish", {"summary": "the human placed it"})
+    run.finalize()
+
+    port = _free_port()
+    app = create_app(out_root=str(tmp_path / "web"), runs_root=str(tmp_path))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    try:
+        dom = _dump_dom(_chrome(), f"http://127.0.0.1:{port}/?run=agent-shared")
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    assert "ERR_CONNECTION" not in dom, "the browser could not reach the server"
+    assert "by you, not the agent" in dom, "the human's own move must be labelled"
+    assert dom.count("by you, not the agent") == 1, "only the human's step carries it"
+    # The controls exist in the page and stay hidden on a settled run, where a
+    # move would have nothing live to act on.
+    assert 'id="movePlace"' in dom and 'id="moveSample"' in dom
+
+
 if __name__ == "__main__":  # a quick manual check against a running server
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q", __file__]))

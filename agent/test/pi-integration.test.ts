@@ -493,6 +493,54 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
     }
   });
 
+  it("journals a human world move under the user's name and tells the model", async () => {
+    // Comments can only suggest. When the human places the point themselves the
+    // record must say it was them, or the trace credits the model with a move
+    // it never made.
+    let observed: Context | undefined;
+    const item = await harness([
+      (context) => {
+        observed = JSON.parse(JSON.stringify(context)) as Context;
+        return fauxAssistantMessage(fauxText("noted, checking it myself"));
+      },
+    ]);
+    try {
+      const result = await item.runtime.userAction("set_var", {
+        name: "T",
+        values: [-1, 0, 1, 0, 0, 0.2],
+      });
+      expect(result.isError).toBe(false);
+      expect(result.tool).toBe("set_var");
+
+      const events = await journal(item.runtime);
+      const move = events.find((entry) => entry.event === "user_action");
+      expect(move).toBeDefined();
+      expect(move?.tool).toBe("set_var");
+
+      const steps = await journalTrace(item.runtime);
+      expect(steps.at(-1)?.actor).toBe("user");
+
+      // The model is told, in the same boundary, that the move was not its own.
+      await item.runtime.prompt("carry on");
+      const said = JSON.stringify((observed as Context).messages);
+      expect(said).toContain("A human collaborator moved the world");
+      expect(said).toContain("This move is theirs, not yours");
+    } finally {
+      await cleanup(item);
+    }
+  });
+
+  it("refuses to let a human call the truth-making instruments", async () => {
+    const item = await harness([fauxAssistantMessage(fauxText("idle"))]);
+    try {
+      await expect(item.runtime.userAction("certify", {})).rejects.toThrow(
+        /not a human world move/,
+      );
+    } finally {
+      await cleanup(item);
+    }
+  });
+
   it("rejects text-only models before starting a kernel process", async () => {
     const root = await mkdtemp(join(tmpdir(), "simagent-p0-vision-"));
     const provider = `simagent-text-${++providerSequence}`;

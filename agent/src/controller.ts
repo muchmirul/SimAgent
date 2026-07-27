@@ -12,6 +12,11 @@ import {
   type SimAgentRuntime,
 } from "./runtime.js";
 import type { KernelFinalizeResult } from "./kernel-client.js";
+import {
+  structured,
+  type StructuredRequest,
+  type StructuredResult,
+} from "./structured.js";
 
 export type ManagedRunStatus = "running" | "stopping" | "stopped" | "done" | "failed";
 
@@ -28,6 +33,11 @@ export interface StartRunRequest {
 export interface CommentRequest {
   text: string;
   target: Record<string, unknown>;
+}
+
+export interface UserActionRequest {
+  tool: string;
+  args: Record<string, unknown>;
 }
 
 export interface BranchRunRequest {
@@ -368,6 +378,34 @@ export class RunController {
     return { run: name, status: "queued" };
   }
 
+  /** The human's own move in the world, on the record and shown to the model. */
+  async userAction(
+    name: string,
+    request: UserActionRequest,
+  ): Promise<{ run: string; tool: string; traceStep: number; isError: boolean }> {
+    const run = this.runs.get(name);
+    if (!run) throw new ControllerError("NOT_FOUND", "unknown agent job");
+    if (run.status !== "running") {
+      throw new ControllerError("CONFLICT", `session is not accepting moves (status: ${run.status})`);
+    }
+    let result;
+    try {
+      result = await run.runtime.userAction(request.tool, request.args);
+    } catch (error) {
+      throw new ControllerError(
+        "CONFLICT",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    this.pushEvent(run, "user_action", { tool: request.tool, args: request.args });
+    return {
+      run: name,
+      tool: result.tool,
+      traceStep: result.traceStep,
+      isError: result.isError,
+    };
+  }
+
   async stop(name: string): Promise<{ run: string; status: string }> {
     const run = this.runs.get(name);
     if (!run) throw new ControllerError("NOT_FOUND", "unknown agent job");
@@ -471,6 +509,11 @@ export class RunController {
     } finally {
       this.creatingRun = false;
     }
+  }
+
+  /** One schema-shaped question to whatever model pi routes (no kernel, no run). */
+  async structured(request: StructuredRequest): Promise<StructuredResult> {
+    return structured(await this.getModelRuntime(), request);
   }
 
   async listModels(): Promise<Array<{ provider: string; id: string; vision: boolean }>> {

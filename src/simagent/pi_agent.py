@@ -203,6 +203,10 @@ class PiAgentClient:
     def comment(self, run: str, text: str, target: dict) -> dict:
         return self._request("comment", run=run, text=text, target=target)
 
+    def user_action(self, run: str, tool: str, args: dict) -> dict:
+        """The human's own world move inside a live run (transport only)."""
+        return self._request("userAction", run=run, tool=tool, args=args)
+
     def stop(self, run: str) -> dict:
         return self._request("stop", timeout=60.0, run=run)
 
@@ -220,6 +224,35 @@ class PiAgentClient:
         if target is not None:
             payload["target"] = target
         return self._request("branch", timeout=120.0, **payload)
+
+    def structured(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        tool_name: str,
+        tool_description: str,
+        schema: dict,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> dict:
+        """One schema-shaped question to whatever model pi routes.
+
+        Transport only: the reply is raw model output, and nothing here can
+        make it valid. `validate_claim` remains the gate.
+        """
+        payload: dict = {
+            "system": system,
+            "prompt": prompt,
+            "toolName": tool_name,
+            "toolDescription": tool_description,
+            "schema": schema,
+        }
+        if provider is not None:
+            payload["provider"] = provider
+        if model is not None:
+            payload["model"] = model
+        return self._request("structured", timeout=300.0, **payload)
 
     def models(self) -> list[dict]:
         return self._request("models", timeout=30.0)

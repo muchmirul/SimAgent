@@ -7,13 +7,18 @@ path is deprecated). The output is validated against the sandbox
 (`validate_claim`); failures are fed back for repair. Structured output keeps
 the schema exact.
 
-Auth: the anthropic client resolves ANTHROPIC_API_KEY or an `ant auth login`
-profile automatically — no key handling here.
+Routing: the request goes to whatever model pi routes, through the same
+control service the agent runs use, so the front door is not pinned to one
+vendor while the main hall is open to any. Pi owns provider auth; there is no
+key handling here, and `--provider/--model` picks a specific model when you
+want one. The reply is raw model output: `validate_claim` remains the gate.
 """
 from __future__ import annotations
 
 import json
 import os
+import tempfile
+from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -29,7 +34,11 @@ from .core.claim import (
 )
 from .core.derive import CONSTRUCTORS
 
-DEFAULT_MODEL = os.environ.get("SIMAGENT_MODEL", "claude-opus-4-8")
+# No default model id: with none given, pi hands over its first authenticated
+# model, exactly as an agent run does. A pinned id here would silently override
+# whatever the operator authenticated.
+DEFAULT_PROVIDER = os.environ.get("SIMAGENT_PROVIDER") or None
+DEFAULT_MODEL = os.environ.get("SIMAGENT_MODEL") or None
 
 
 # -- the structured-output schema (mirrors claim/1 JSON) -----------------------
@@ -151,36 +160,42 @@ class FormalizeError(RuntimeError):
     pass
 
 
-def _request_claim(client, model: str, messages: list[dict]) -> dict:
-    """One structured-output request; parse() with a raw-schema fallback."""
+def _ask(
+    schema_model,
+    *,
+    system: str,
+    prompt: str,
+    tool_name: str,
+    tool_description: str,
+    provider: str | None,
+    model: str | None,
+    client=None,
+) -> tuple[dict, str]:
+    """One schema-shaped request through pi. Returns (output, "provider/model").
+
+    The model is named back to the caller because SimAgent harnesses whichever
+    one pi routes: a formalization nobody can attribute is not reproducible.
+    """
+    from .pi_agent import PiAgentClient
+
+    owned = client is None
+    talk = client or PiAgentClient(Path(tempfile.mkdtemp(prefix="simagent-formalize-")))
     try:
-        resp = client.messages.parse(
+        reply = talk.structured(
+            system=system,
+            prompt=prompt,
+            tool_name=tool_name,
+            tool_description=tool_description,
+            schema=schema_model.model_json_schema(),
+            provider=provider,
             model=model,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            system=build_system_prompt(),
-            messages=messages,
-            output_format=ClaimModel,
         )
-        if resp.stop_reason == "refusal":
-            raise FormalizeError("model refused the formalization request")
-        if resp.parsed_output is None:
-            raise FormalizeError(f"no parsed output (stop_reason={resp.stop_reason})")
-        return resp.parsed_output.model_dump()
-    except (AttributeError, TypeError):
-        schema = ClaimModel.model_json_schema()
-        resp = client.messages.create(
-            model=model,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            system=build_system_prompt(),
-            messages=messages,
-            output_config={"format": {"type": "json_schema", "schema": schema}},
-        )
-        if resp.stop_reason == "refusal":
-            raise FormalizeError("model refused the formalization request")
-        text = next(b.text for b in resp.content if b.type == "text")
-        return json.loads(text)
+    except Exception as e:  # noqa: BLE001 - a routing failure must name itself
+        raise FormalizeError(f"pi could not answer: {type(e).__name__}: {e}") from e
+    finally:
+        if owned:
+            talk.close()
+    return reply["output"], f"{reply['provider']}/{reply['model']}"
 
 
 def claim_from_model_dump(data: dict) -> Claim:
@@ -193,22 +208,28 @@ def formalize(
     model: str | None = None,
     max_repairs: int = 2,
     log=print,
+    provider: str | None = None,
+    client=None,
 ) -> Claim:
     """Conjecture text -> validated native Claim (with a repair loop)."""
-    import anthropic
-
-    client = anthropic.Anthropic()
-    model = model or DEFAULT_MODEL
-    messages: list[dict] = [
-        {
-            "role": "user",
-            "content": f"Formalize this conjecture into a native Claim:\n\n{conjecture_text}",
-        }
-    ]
+    prompt = f"Formalize this conjecture into a native Claim:\n\n{conjecture_text}"
     errors: list[str] = []
     for attempt in range(max_repairs + 1):
-        log(f"[llm] formalize attempt {attempt + 1} (model={model})")
-        claim_dict = _request_claim(client, model, messages)
+        claim_dict, who = _ask(
+            ClaimModel,
+            system=build_system_prompt(),
+            prompt=prompt,
+            tool_name="emit_claim",
+            tool_description=(
+                "Return the formalized claim. Every field is required unless the "
+                "schema marks it optional, and every kind must be a registry key "
+                "from the system prompt."
+            ),
+            provider=provider or DEFAULT_PROVIDER,
+            model=model or DEFAULT_MODEL,
+            client=client,
+        )
+        log(f"[llm] formalize attempt {attempt + 1} answered by {who}")
         try:
             claim = claim_from_model_dump(claim_dict)
             errors = validate_claim(claim)
@@ -218,16 +239,16 @@ def formalize(
             log(f"[llm] claim '{claim.id}' validated against the sandbox")
             return claim
         log(f"[llm] claim failed validation: {errors}")
-        messages.append({"role": "assistant", "content": json.dumps(claim_dict)})
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "That claim failed sandbox validation:\n- "
-                    + "\n- ".join(errors)
-                    + "\nReturn a corrected, complete claim (all fields, registry keys only)."
-                ),
-            }
+        # One user turn per attempt: the previous answer is quoted back rather
+        # than replayed as an assistant turn, so every provider sees the same
+        # well-formed conversation.
+        prompt = (
+            f"Formalize this conjecture into a native Claim:\n\n{conjecture_text}\n\n"
+            "Your previous attempt was:\n```json\n"
+            + json.dumps(claim_dict, indent=2)
+            + "\n```\n\nIt failed sandbox validation:\n- "
+            + "\n- ".join(errors)
+            + "\nReturn a corrected, complete claim (all fields, registry keys only)."
         )
     raise FormalizeError(f"claim failed validation after {max_repairs + 1} attempts: {errors}")
 
@@ -273,30 +294,32 @@ Rules (the harness enforces them; do not fight them):
   unverified, which is the honest outcome."""
 
 
-def attempt_proof(spec, report_json: dict, model: str | None = None) -> dict:
-    """One structured deductive proof attempt: {method, argument, lean_code}."""
-    import anthropic
+def attempt_proof(
+    spec,
+    report_json: dict,
+    model: str | None = None,
+    provider: str | None = None,
+    client=None,
+) -> dict:
+    """One structured deductive proof attempt: {method, argument, lean_code}.
 
-    client = anthropic.Anthropic()
-    resp = client.messages.parse(
-        model=model or DEFAULT_MODEL,
-        max_tokens=16000,
-        thinking={"type": "adaptive"},
+    The Lean code is checked by the kernel afterwards; nothing returned here
+    is believed on its own.
+    """
+    output, _who = _ask(
+        ProofAttemptModel,
         system=PROOF_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Claim:\n```json\n"
-                    + json.dumps(spec.to_json(), indent=2)
-                    + "\n```\n\nSearch report:\n```json\n"
-                    + json.dumps(report_json, indent=2)
-                    + "\n```"
-                ),
-            }
-        ],
-        output_format=ProofAttemptModel,
+        prompt=(
+            "Claim:\n```json\n"
+            + json.dumps(spec.to_json(), indent=2)
+            + "\n```\n\nSearch report:\n```json\n"
+            + json.dumps(report_json, indent=2)
+            + "\n```"
+        ),
+        tool_name="emit_proof_attempt",
+        tool_description="Return one deductive proof attempt for this claim.",
+        provider=provider or DEFAULT_PROVIDER,
+        model=model or DEFAULT_MODEL,
+        client=client,
     )
-    if resp.stop_reason == "refusal" or resp.parsed_output is None:
-        raise FormalizeError(f"no proof attempt (stop_reason={resp.stop_reason})")
-    return resp.parsed_output.model_dump()
+    return output

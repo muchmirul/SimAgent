@@ -16,6 +16,7 @@ import {
   type KernelClientOptions,
   type KernelDescription,
   type KernelFinalizeResult,
+  type KernelUserActionResult,
 } from "./kernel-client.js";
 import { createKernelTools, isKernelToolDetails, KERNEL_TOOL_NAMES } from "./tools.js";
 
@@ -367,6 +368,55 @@ export class SimAgentRuntime {
         for (const toolCallId of sourceToolCalls) this.steeringSourceToolCalls.delete(toolCallId);
       });
     await boundary;
+  }
+
+  /**
+   * Let the human move the world mid-run, and tell the model it happened.
+   *
+   * Comments can only suggest; sometimes the collaborator has to just place
+   * the point. The kernel journals the move under the user's name, and the
+   * model is told in the same boundary so it never mistakes the new
+   * configuration for one of its own.
+   */
+  async userAction(tool: string, args: Record<string, unknown>): Promise<KernelUserActionResult> {
+    if (this.kernel.tip.finished) throw new Error("cannot act on a finished kernel session");
+    const batch = this.waitForToolBatch();
+    const sourceToolCalls = [...this.activeToolCalls];
+    for (const toolCallId of sourceToolCalls) this.steeringSourceToolCalls.add(toolCallId);
+    const boundary = this.steeringBoundary.then(async () => {
+      await batch;
+      if (this.kernel.tip.finished) throw new Error("the kernel finished before the action boundary");
+      const result = await this.kernel.userAction(tool, args);
+      const reported = result.content
+        .filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      const notice =
+        `A human collaborator moved the world: ${tool}(${JSON.stringify(args)}).\n` +
+        `Kernel result: ${reported}\n` +
+        "This move is theirs, not yours. Check it rather than assuming it is right.";
+      if (this.session.isStreaming) {
+        await this.session.steer(notice);
+      } else {
+        await this.session.sendCustomMessage(
+          {
+            customType: "simagent-user-action",
+            content: notice,
+            display: true,
+            details: { tool, args },
+          },
+          { triggerTurn: false },
+        );
+      }
+      return result;
+    });
+    this.steeringBoundary = boundary
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        for (const toolCallId of sourceToolCalls) this.steeringSourceToolCalls.delete(toolCallId);
+      });
+    return boundary;
   }
 
   async seedComment(text: string, target: Record<string, unknown>): Promise<void> {

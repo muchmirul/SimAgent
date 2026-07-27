@@ -16,26 +16,34 @@ import numpy as np
 NEAR_BOUNDARY = 0.05
 
 
-def qualitative_lines(vars: dict, check: dict) -> list[str]:
+def _measure_lines(vars: dict, check: dict, spec) -> list[str]:
+    """Predicates written by the claim's own measure, via the MEASURES registry.
+
+    Each measure kind describes its own state, because only it knows what its
+    numbers mean: `min_coord` speaks about faces of a simplex, `expr` about the
+    terms of its margin. Without this the perceptual layer could only repeat
+    the margin the model already had.
+    """
+    from .claim import MEASURES
+
+    measure = getattr(spec, "measure", None)
+    if not isinstance(measure, dict):
+        return []
+    entry = MEASURES.get(measure.get("kind"))
+    describe = (entry or {}).get("qualitative")
+    if describe is None:
+        return []
+    try:
+        return list(describe(vars, check, measure))
+    except Exception as e:  # noqa: BLE001 - a description must never break a tool call
+        return [f"(could not describe this measure: {type(e).__name__}: {e})"]
+
+
+def qualitative_lines(vars: dict, check: dict, spec=None) -> list[str]:
     """Human/agent-readable predicates for the current state."""
-    lines: list[str] = []
     if check.get("error"):
         return [f"degenerate configuration: {check['error']}"]
-    data = check.get("data") or {}
-    bary = data.get("barycentric")
-    if bary is not None:
-        w = np.asarray(bary, dtype=float).ravel()
-        k = int(np.argmin(w))
-        if float(w.min()) > 0:
-            lines.append(
-                f"the point is INSIDE the simplex (all {w.size} barycentric "
-                f"coordinates positive; smallest is w[{k}] = {w.min():.4g})"
-            )
-        else:
-            lines.append(
-                f"the point is OUTSIDE the simplex — beyond the face opposite "
-                f"vertex {k} (barycentric w[{k}] = {w.min():.4g} < 0)"
-            )
+    lines: list[str] = _measure_lines(vars, check, spec)
     margin, holds = check.get("margin"), check.get("holds")
     if margin is None:
         lines.append(f"discrete claim at this configuration: holds = {holds}")
@@ -54,12 +62,12 @@ def qualitative_lines(vars: dict, check: dict) -> list[str]:
     return lines
 
 
-def measure_state(vars: dict, check: dict) -> dict:
+def measure_state(vars: dict, check: dict, spec=None) -> dict:
     """The agent-facing measurement of the current configuration."""
     return {
         "holds": None if check.get("error") else check.get("holds"),
         "margin": None if check.get("error") else check.get("margin"),
-        "qualitative": qualitative_lines(vars, check),
+        "qualitative": qualitative_lines(vars, check, spec),
         "data": check.get("data") if not check.get("error") else None,
         "error": check.get("error"),
     }

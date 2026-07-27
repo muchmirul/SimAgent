@@ -148,7 +148,7 @@ marked `(from problems/)`. Refresh the page and pick it like any other problem.
 `problems/README.md` explains the fields, and `problems/three-xy.json` is a
 working example to copy.
 
-That path needs no Claude access, because you wrote the claim yourself instead
+That path needs no formalizer model, because you wrote the claim yourself instead
 of asking a model to write it. The stamp differs though: a file here is not
 bundled, so a Lean-checked result says `statement_review =
 spec-generated-review-needed`. The arithmetic is kernel checked either way, but
@@ -162,19 +162,19 @@ terminal. For example:
 
 > the incenter of every triangle lies inside the triangle
 
-Then press **Run agent**. There are currently two model stages, and they are
-separate models on purpose:
+Then press **Run agent**. There are two model stages, and they can be
+different models on purpose:
 
-1. Claude formalizes the sentence into a native claim and validates it against
-   the closed sandbox registries.
+1. A model formalizes the sentence into a native claim, which is then
+   validated against the closed sandbox registries.
 2. Pi launches the model you selected, at the thinking level you selected, to
    investigate that claim.
 
-Stage 1 is pinned to Claude because it uses structured output plus a repair
-loop against the registries, and it needs `ANTHROPIC_API_KEY` or an
-`ant auth login` profile. If Claude access is not configured, use a bundled
-problem: those are already formalized, so stage 1 is skipped entirely and any
-pi model can run them.
+Both stages go through pi, so neither is tied to a particular vendor. Stage 1
+needs no vision, because it reads words and writes JSON; stage 2 does, because
+it looks at the scene. With no `--provider/--model` each stage takes pi's
+first suitable authenticated model. If nothing is authenticated, use a bundled
+problem: those are already formalized, so stage 1 is skipped entirely.
 
 ## 6. Replay past runs
 

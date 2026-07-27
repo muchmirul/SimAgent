@@ -204,7 +204,7 @@ the sandbox:
 (cd agent && npm ci --ignore-scripts && npm run build)
 ```
 
-**A Claude API key** (`ANTHROPIC_API_KEY` or an `ant auth login` profile) enables
+**One authenticated pi model** (pi owns provider auth) enables
 turning plain English into a claim:
 
 ```bash
