@@ -15,7 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
+# websocket-client drives headless Chromium over the DevTools protocol in
+# tests/test_ui_browser.py. Undeclared, it is present on a developer machine
+# that once installed it and absent from every fresh install, so the page tests
+# passed locally and failed in CI. The suite must not lose them to a skip: a
+# skip nobody notices is how three UI bugs shipped green.
+dev = ["pytest>=8", "httpx>=0.27", "websocket-client>=1.7"]
 viz = ["manim>=0.18"]
 
 [project.scripts]

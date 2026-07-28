@@ -58,7 +58,10 @@ describe.sequential("P6 run controller", () => {
       const source = (await controller.start({ problemId: "circumcenter-in-triangle" })).run;
       await waitTerminal(controller, source);
       const sourceStatus = controller.status(source);
-      expect(sourceStatus.status).toBe("done");
+      expect({ status: sourceStatus.status, error: sourceStatus.error }).toEqual({
+        status: "done",
+        error: null,
+      });
       expect(sourceStatus.checkpoints.some((checkpoint) => checkpoint.kernelTraceStep === 1)).toBe(true);
 
       let branchContext: Context | undefined;
@@ -82,7 +85,14 @@ describe.sequential("P6 run controller", () => {
         })
       ).run;
       await waitTerminal(controller, branch);
-      expect(controller.status(branch).status).toBe("done");
+      // Assert on the error too, not just the status. A bare status assertion
+      // says "expected failed to be done" and nothing else, which is a dead end
+      // for whoever reads it in CI where the run directory is already gone.
+      const branchStatus = controller.status(branch);
+      expect({ status: branchStatus.status, error: branchStatus.error }).toEqual({
+        status: "done",
+        error: null,
+      });
       const proof = JSON.parse(await readFile(join(root, branch, "proof.json"), "utf8")) as Record<string, unknown>;
       expect(proof.statement_review).toBe("bundled-trusted");
       const trace = (await readFile(join(root, branch, "trace.jsonl"), "utf8"))
