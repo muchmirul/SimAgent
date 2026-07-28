@@ -24,9 +24,15 @@ uv pip install -p .venv/bin/python -e ".[dev]"
 The last command opens the exact pi version pinned by SimAgent. Inside pi,
 enter `/login`, authenticate whichever provider you have, then quit pi. Any
 provider pi supports will do: SimAgent has no blessed model, and it harnesses
-whatever pi routes. The one real requirement is **vision**, because the agent
-works by looking at the scene, so the notebook only offers models that accept
-images.
+whatever pi routes. There is no vision requirement: SimAgent is
+**numbers-first**, so a text-only model can drive a whole run. Vision matters
+only for an `--images` run, which also sends the rendered pictures to the
+model; the picker marks text-only models so you know which is which.
+
+One caveat with a real cost: formalizing plain English into a Claim is a
+structured tool call, and not every small model can make one. If the notebook
+answers "the formalizer could not answer", pick a larger model in the picker
+rather than leaving it to whichever model pi lists first.
 
 Check that a provider and model are usable, without printing credentials
 (substitute your own, this is only an example):
@@ -170,11 +176,56 @@ different models on purpose:
 2. Pi launches the model you selected, at the thinking level you selected, to
    investigate that claim.
 
-Both stages go through pi, so neither is tied to a particular vendor. Stage 1
-needs no vision, because it reads words and writes JSON; stage 2 does, because
-it looks at the scene. With no `--provider/--model` each stage takes pi's
-first suitable authenticated model. If nothing is authenticated, use a bundled
-problem: those are already formalized, so stage 1 is skipped entirely.
+Both stages go through pi, so neither is tied to a particular vendor, and
+neither needs vision: SimAgent is numbers-first. With no `--provider/--model`
+each stage takes pi's first authenticated model. Stage 1 is a structured tool
+call, and small models often cannot make one, so if you see "the formalizer
+could not answer", pick a larger model rather than accepting the default. If
+nothing is authenticated, use a bundled problem: those are already formalized,
+so stage 1 is skipped entirely.
+
+### You approve the claim before anything runs
+
+Between the two stages the run stops and shows you what it will actually
+settle: the question as the formalizer wrote it, the quantifier, the domain
+bounds, any assumptions, what the margin means, and how strong a verdict this
+claim can earn. Nothing starts until you say yes.
+
+This exists because the worst failure a harness like this can have is silent:
+a model translates your words into a NEARBY claim, the kernel settles that one
+perfectly, and every artifact reports success. `verified_by` cannot catch it,
+because it measures how well the machine checked the claim it was given, not
+whether that claim is your question.
+
+Two things follow. A formalizer that cannot express your conjecture REFUSES
+instead of substituting something close, and you are told why. And approval is
+tied to one exact claim by hash: re-formalizing produces a different claim and
+your old approval stops counting on its own.
+
+On the command line the same gate prints the claim and its hash:
+
+```bash
+.venv/bin/simagent agent --conjecture "..." --provider P --model M
+#   ... prints the claim, then refuses to start ...
+.venv/bin/simagent agent --conjecture "..." --provider P --model M \
+  --approve-claim <hash>
+```
+
+Every run writes `intake.json` beside its other artifacts: your exact words,
+which model translated them, the claim, its hash, and the review state.
+`answer.md` repeats all of it in its header, so a result read months later
+still names the question it answers. This review confirms the TRANSLATION
+only; it never touches `verified_by`.
+
+### While it runs, you can take over
+
+**⏸ pause** holds the agent at its next finished step: the action it was
+running completes, the next one does not start. That is the only moment a
+human can safely work on the state. While paused, click any point in the 3D
+view and you get its variable and row bound automatically, with **place**,
+**nudge** and **construct** controls. Your move is journaled under your name,
+the agent is told it was yours, and the panel names the step it became. Press
+**▶ resume** and the agent continues from the world you left.
 
 ## 6. Replay past runs
 
@@ -204,7 +255,7 @@ steered there.
 ```
 
 The provider and model above are an example, and the two flags go together or
-not at all. Leave both out and pi routes the first authenticated vision model
+not at all. Leave both out and pi routes the first authenticated model
 it has; the command says so before it starts, and prints `Model:
 <provider>/<model>` when it ends, so you never have to guess afterwards which
 model produced the run.

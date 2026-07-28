@@ -1,14 +1,30 @@
 # SimAgent architecture
 
-SimAgent is an **agent harness for visualization-based math**: a small kernel
-with a strict responsibility split, where correctness beats features. Humans
-and agents solve math by communicating through visuals — imagine, visualize,
-act, and only then formalize (equations are the *translation* of thought,
-never the medium). See plan.md for the full v2 design and decision log.
+SimAgent is an **agent harness for experience-based math**: a small kernel
+with a strict responsibility split, where correctness beats features. A model
+solves math by ACTING in a world that answers every move with exact numbers —
+place, nudge, refine, read the margin — and only then formalizes (equations
+are the *translation* of thought, never the medium). See plan.md for the full
+v2 design and decision log.
 
 core idea of sim agent is this :
-1. simagent is the harness on how to get of the best harness to routed models llm, to solve any math problem by experiencing doing math by viz and equation is just formalization. instead of just using text file. and gathering information from outside. doing it by first principle.
-2. as a toll human and ai agent can collaborate on solving, sometimes human get stuck agent help, and sometime human giving idea while agent stuck. this done by seamless ui that human can giving comment on the step that agent do.
+1. simagent is the harness that gives a routed llm the best way to solve a
+   math problem by EXPERIENCING it rather than reading a text file, from first
+   principles. NUMBERS-FIRST (decided 2026-07-27, todo.md step 0): the model's
+   senses are text and coordinates — exact margins, exact positions, `measure`
+   words — because current models read numbers exactly and pixels coarsely.
+   Pictures come from the same kernel state but their audience is the HUMAN;
+   sending them to the model is a per-run flag, default off.
+2. as a tool human and ai agent collaborate on solving: sometimes the human is
+   stuck and the agent helps, sometimes the human gives the idea while the
+   agent is stuck. this happens in a seamless ui where the human comments on,
+   pauses at, and directly moves the exact step the agent took.
+
+**Measured, not assumed** (2026-07-28, `runs/eval-live/eval.json`): on
+`circumcenter-near-centroid`, automatic search certified 0 of 3 seeds while a
+model acting in the world certified 3 of 3, median 9 turns. Images did not
+separate from text (3 of 3, median 11 turns), which is why numbers-first is
+the default and the image channel is a flag rather than a deletion.
 
 
 ## The eight atoms

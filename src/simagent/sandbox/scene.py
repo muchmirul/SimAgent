@@ -30,8 +30,18 @@ GOOD = "#137333"   # the property holds
 BAD = "#c5221f"    # the property fails
 
 
-def points(coords, color: str = INK, radius: float = 0.05, name: str | None = None) -> dict:
-    return {"type": "points", "coords": _pts3(coords), "color": color, "radius": radius, "name": name}
+def points(coords, color: str = INK, radius: float = 0.05, name: str | None = None,
+           binds: str | None = None) -> dict:
+    """A set of dots. `binds` names the FREE variable they render, so index i is
+    row i of that variable.
+
+    Without it a picked dot is just a position on screen: the UI can talk about
+    it but cannot move it, because it does not know which number to change. A
+    DERIVED point (a circumcenter, say) leaves binds empty on purpose, since
+    moving it directly would mean nothing.
+    """
+    return {"type": "points", "coords": _pts3(coords), "color": color,
+            "radius": radius, "name": name, "binds": binds}
 
 
 def segments(pairs, color: str = EDGE, width: float = 2.0) -> dict:

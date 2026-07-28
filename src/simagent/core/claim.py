@@ -425,7 +425,10 @@ def _scene_simplex(env: dict, params: dict) -> list[dict]:
     # circumcentre, so a claim about another centre turns it off
     if not projected and params.get("circle", True):
         prims.append(scene.sphere(c3, r, color=scene.HALO, opacity=0.14))
-    prims.append(scene.points(P, color=scene.INK, radius=0.05))
+    # The vertices ARE the free variable, so a picked one can be moved. The
+    # centre is derived: it has no row of its own to change.
+    prims.append(scene.points(P, color=scene.INK, radius=0.05,
+                              binds=None if projected else params["of"]))
     prims.append(scene.points([c3], color=scene.GOOD if inside else scene.BAD,
                               radius=0.07, name=center_name))
     label = "circumcenter %s (min barycentric = %.3f)" % (
@@ -450,7 +453,7 @@ def _scene_hull3d(env: dict, params: dict) -> list[dict]:
     return [
         scene.mesh(verts, faces, color=scene.FACE, opacity=0.25),
         scene.segments(edges, color=scene.EDGE, width=1.5),
-        scene.points(Pts, color=scene.INK, radius=0.04),
+        scene.points(Pts, color=scene.INK, radius=0.04, binds=params["of"]),
         scene.label("V=%d  E=%d  F=%d   V-E+F=%d" % (V, E, F, V - E + F)),
     ]
 
@@ -503,7 +506,8 @@ def _scene_point(env: dict, params: dict) -> list[dict]:
     origin = [0.0] * P.shape[1]
     prims = [
         scene.segments([(origin, p) for p in P], color=scene.EDGE, width=1.5),
-        scene.points(P, color=scene.HALO, radius=0.06, name=params["of"]),
+        scene.points(P, color=scene.HALO, radius=0.06, name=params["of"],
+                     binds=params["of"] if A.ndim == 2 and A.shape[-1] <= 3 else None),
     ]
     label = "%s = %s" % (params["of"], np.array2string(A, precision=3))
     if d > 3:

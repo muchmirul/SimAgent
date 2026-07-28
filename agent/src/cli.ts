@@ -49,7 +49,10 @@ async function authCheck(argv: string[]): Promise<number> {
     vision: model.input.includes("image"),
   };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  return result.configured && result.vision ? 0 : 2;
+  // Vision is reported, not required: SimAgent is numbers-first, so a
+  // text-only model can drive a whole run. It is only required for a run
+  // started with `--images true`.
+  return result.configured ? 0 : 2;
 }
 
 async function runSession(argv: string[]): Promise<number> {
@@ -69,6 +72,9 @@ async function runSession(argv: string[]): Promise<number> {
     outDir,
     thinkingLevel: (options.get("thinking") ?? "medium") as NonNullable<CreateSimAgentRuntimeOptions["thinkingLevel"]>,
     singleToolPerTurn: true,
+    // numbers-first by default; `--images true` turns the picture channel on
+    images: options.get("images") === "true",
+    seed: Number(options.get("seed") ?? 0),
   };
   if (problemId !== undefined) runtimeOptions.problemId = problemId;
   if (specPath !== undefined) runtimeOptions.specPath = resolve(specPath);
@@ -168,7 +174,7 @@ async function main(): Promise<number> {
   process.stderr.write(
     "usage:\n" +
       "  cli.js auth-check --provider NAME --model ID\n" +
-      "  cli.js run (--problem-id ID | --spec PATH) --out-dir PATH [--provider NAME --model ID]\n" +
+      "  cli.js run (--problem-id ID | --spec PATH) --out-dir PATH [--provider NAME --model ID] [--images true] [--seed N]\n" +
       "  cli.js smoke --provider NAME --model ID [--problem-id ID] [--out-dir PATH]\n",
   );
   return 2;

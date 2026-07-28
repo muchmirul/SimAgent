@@ -43,6 +43,11 @@ def _triangle_claim_dump() -> dict:
     return data
 
 
+def _supported(claim_dump: dict) -> dict:
+    """The formalizer's answer shape: a claim, or a refusal, never a swap."""
+    return {"supported": True, "claim": claim_dump, "refusal": ""}
+
+
 def test_llm_imports_no_vendor_sdk():
     """A pinned SDK import is how the vendor lock comes back."""
     source = Path(llm.__file__).read_text()
@@ -57,7 +62,7 @@ def test_no_model_is_pinned_by_default():
 
 
 def test_formalize_asks_pi_and_validates_the_answer():
-    pi = FakePi([_triangle_claim_dump()])
+    pi = FakePi([_supported(_triangle_claim_dump())])
     claim = llm.formalize("circumcenter inside every triangle", client=pi, log=lambda *_: None)
 
     assert claim.id == "circumcenter-in-triangle"
@@ -66,14 +71,15 @@ def test_formalize_asks_pi_and_validates_the_answer():
     assert request["provider"] is None and request["model"] is None
     # The schema on the wire is the claim schema, so the shape is enforced by
     # the tool call rather than by hoping the model returns clean JSON.
-    assert request["schema"]["properties"]["quantifier"] is not None
+    claim_schema = request["schema"]["$defs"]["ClaimModel"]
+    assert claim_schema["properties"]["quantifier"] is not None
     assert not pi.closed, "a caller-owned client must outlive the call"
 
 
 def test_formalize_repairs_with_the_validation_errors_quoted_back():
     broken = _triangle_claim_dump()
     broken["measure"] = {"kind": "no_such_measure"}
-    pi = FakePi([broken, _triangle_claim_dump()])
+    pi = FakePi([_supported(broken), _supported(_triangle_claim_dump())])
     claim = llm.formalize("circumcenter inside every triangle", client=pi, log=lambda *_: None)
 
     assert claim.id == "circumcenter-in-triangle"
@@ -119,7 +125,7 @@ def test_the_client_the_formalizer_opens_itself_is_closed_again():
     made = []
 
     def fake_factory(_root):
-        client = FakePi([_triangle_claim_dump()])
+        client = FakePi([_supported(_triangle_claim_dump())])
         made.append(client)
         return client
 
@@ -135,7 +141,7 @@ def test_the_client_the_formalizer_opens_itself_is_closed_again():
 
 
 def test_a_specific_model_is_passed_straight_through():
-    pi = FakePi([_triangle_claim_dump()])
+    pi = FakePi([_supported(_triangle_claim_dump())])
     llm.formalize("x", client=pi, provider="somewhere", model="some-model",
                   log=lambda *_: None)
     assert pi.requests[0]["provider"] == "somewhere"
@@ -146,7 +152,46 @@ def test_formalize_gives_up_with_the_last_errors_named():
     """A repair loop that ends in silence is one the caller cannot diagnose."""
     broken = _triangle_claim_dump()
     broken["measure"] = {"kind": "no_such_measure"}
-    pi = FakePi([dict(broken) for _ in range(3)])
+    pi = FakePi([_supported(dict(broken)) for _ in range(3)])
     with pytest.raises(llm.FormalizeError, match="no_such_measure"):
         llm.formalize("x", client=pi, max_repairs=2, log=lambda *_: None)
     assert len(pi.requests) == 3, "max_repairs=2 means three attempts in total"
+
+
+def test_a_refusal_is_an_answer_not_a_substitute():
+    """The worst formalizer failure is the quiet one: asked something the
+    registries cannot state, it returns a NEARBY claim and the harness settles
+    that instead. The schema gives 'I cannot' somewhere to go."""
+    pi = FakePi([{"supported": False, "claim": None,
+                  "refusal": "no Space expresses an arbitrary graph family"}])
+    with pytest.raises(llm.FormalizeRefused, match="no Space expresses"):
+        llm.formalize("every graph has a perfect matching", client=pi, log=lambda *_: None)
+    assert len(pi.requests) == 1, "a refusal must not be retried as if it were an error"
+
+
+def test_the_refusal_names_the_model_that_refused():
+    pi = FakePi([{"supported": False, "claim": None, "refusal": "out of vocabulary"}])
+    try:
+        llm.formalize("x", client=pi, log=lambda *_: None)
+    except llm.FormalizeRefused as refused:
+        assert refused.formalizer == "somewhere/some-model"
+    else:
+        raise AssertionError("expected a refusal")
+
+
+def test_the_prompt_forbids_substituting_a_nearby_claim():
+    """This instruction is the difference between a refusal and a swap."""
+    prompt = llm.build_system_prompt().lower()
+    assert "supported: false" in prompt
+    assert "different question" in prompt
+    assert "nearest faithful bounded" not in prompt
+
+
+def test_formalize_recorded_keeps_who_translated_it():
+    pi = FakePi([_supported(_triangle_claim_dump())])
+    made = llm.formalize_recorded("circumcenter inside every triangle", client=pi,
+                                  log=lambda *_: None)
+    assert made.formalizer == "somewhere/some-model"
+    assert made.source_text == "circumcenter inside every triangle"
+    assert made.attempts == 1
+    assert made.claim.id == "circumcenter-in-triangle"

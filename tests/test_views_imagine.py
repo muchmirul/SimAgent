@@ -92,8 +92,9 @@ def test_view_tool_journals_metadata(tmp_path):
     content, err = run.dispatch("view", {"kind": "field", "var": "T", "row": 2,
                                           "resolution": 24})
     assert not err
-    kinds = {b["type"] for b in content}
-    assert kinds == {"image", "text"}
+    # numbers-first: the model gets the measured metadata as text, and the
+    # render is still journaled for the human notebook
+    assert isinstance(content, str) and "kind" in content
     step = read_trace(tmp_path)["steps"][-1]
     assert step["extra"]["view"]["kind"] == "field"
     assert (tmp_path / step["image"]).exists()

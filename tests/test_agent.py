@@ -4,6 +4,7 @@ from pathlib import Path
 
 from simagent import agent
 from simagent.agent import AgentRun
+from simagent.core.journal import read_trace
 from simagent.library import get
 from simagent.proof import Method
 
@@ -111,13 +112,54 @@ def test_recall_counts_the_acts_it_drops(tmp_path):
 
 
 def test_look_carries_the_coordinates_too(tmp_path):
-    """The vision path must not be the one place the numbers go missing."""
+    """`look` is a report, and the numbers are the part that must always be in
+    it: numbers-first means the coordinates survive whether or not this run
+    also ships the picture."""
     run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
     run.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
-    blocks, error = run.dispatch("look", {})
+    text, error = run.dispatch("look", {})
+    assert not error
+    assert json.loads(text.removeprefix("status: "))["config"]["T"][2] == [0.0, 0.2]
+
+    seeing = AgentRun(get("circumcenter-in-triangle"), tmp_path / "images", images=True)
+    seeing.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    blocks, error = seeing.dispatch("look", {})
     assert not error
     text = next(b["text"] for b in blocks if b["type"] == "text")
     assert json.loads(text.removeprefix("status: "))["config"]["T"][2] == [0.0, 0.2]
+
+
+def test_pictures_reach_the_model_only_when_the_run_says_so(tmp_path):
+    """Step 0 of todo.md: the model's senses are text and coordinates by
+    default. The renders still land on disk, because the notebook is the
+    human's channel and the trace is the record of the run either way."""
+    quiet = AgentRun(get("circumcenter-in-triangle"), tmp_path / "quiet")
+    loud = AgentRun(get("circumcenter-in-triangle"), tmp_path / "loud", images=True)
+
+    for run in (quiet, loud):
+        run.dispatch("look", {})
+        run.dispatch("view", {"kind": "field", "var": "T", "row": 2, "resolution": 12})
+        run.dispatch("imagine", {"ops": [{"op": "nudge", "target": "T", "row": 2,
+                                          "delta": [0.0, 0.3]}]})
+
+    def image_blocks(content):
+        return [b for b in content if isinstance(b, dict) and b.get("type") == "image"]
+
+    for tool, args in (("look", {}),
+                       ("view", {"kind": "sweep", "var": "T", "row": 2}),
+                       ("imagine", {"ops": [{"op": "nudge", "target": "T", "row": 2,
+                                             "delta": [0.0, 0.1]}]})):
+        quiet_content, quiet_err = quiet.dispatch(tool, dict(args))
+        loud_content, loud_err = loud.dispatch(tool, dict(args))
+        assert not quiet_err and not loud_err
+        assert isinstance(quiet_content, str), f"{tool} sent blocks with images off"
+        assert image_blocks(loud_content), f"{tool} sent no picture with images on"
+
+    # both runs rendered the same evidence for the human
+    for run in (quiet, loud):
+        steps = [s for s in read_trace(run.out)["steps"] if s.get("image")]
+        assert steps, "renders must be written even when the model never sees them"
+        assert all((run.out / s["image"]).exists() for s in steps)
 
 
 def test_coordinates_are_rounded_not_dumped_at_full_precision(tmp_path):

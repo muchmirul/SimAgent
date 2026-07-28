@@ -143,7 +143,8 @@ It also accepts `--spec FILE` or `--conjecture "..."`.
 
 The provider and model in the second command are only an example, and the two
 flags go together or not at all. The first command gives neither, so pi routes
-the first authenticated vision model it has, prints that it is doing so, and
+the first authenticated model it has (vision is needed only for an `--images`
+run), prints that it is doing so, and
 prints `Model: <provider>/<model>` when the run ends. SimAgent has no blessed
 model; it harnesses whichever one pi routes.
 

@@ -51,6 +51,7 @@ async function harness(
     persistent?: boolean;
     input?: ("text" | "image")[];
     singleToolPerTurn?: boolean;
+    images?: boolean;
   } = {},
 ): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "simagent-p0-"));
@@ -77,6 +78,7 @@ async function harness(
     modelRuntime,
     model,
     singleToolPerTurn: options.singleToolPerTurn,
+    images: options.images,
   });
   return { root, runtime, faux, modelRuntime };
 }
@@ -128,7 +130,37 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
     }
   });
 
-  it("delivers look image blocks to the next faux-provider context", async () => {
+  it("sends no picture to the model by default, only the numbers", async () => {
+    // Numbers-first (todo.md step 0): the default run's senses are text and
+    // coordinates, so a model that cannot see is still a valid driver.
+    let observed: Context | undefined;
+    const item = await harness([
+      fauxAssistantMessage(fauxToolCall("look", {}, { id: "call-look-text" }), {
+        stopReason: "toolUse",
+      }),
+      (context) => {
+        observed = JSON.parse(JSON.stringify(context)) as Context;
+        return fauxAssistantMessage(fauxText("numbers received"));
+      },
+    ]);
+    try {
+      await item.runtime.promptTask();
+      const results = toolResults(observed as Context);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.content.some((block) => block.type === "image")).toBe(false);
+      const text = results[0]?.content.find((block) => block.type === "text");
+      expect(text?.text).toContain("margin");
+      // the render still exists for the human notebook
+      const rendered = await readFile(
+        join(dirname(item.runtime.kernel.description.journalPath), "looks", "look_001.png"),
+      );
+      expect(rendered.length).toBeGreaterThan(100);
+    } finally {
+      await cleanup(item);
+    }
+  }, 30_000);
+
+  it("delivers look image blocks to the next faux-provider context when images are on", async () => {
     let observed: Context | undefined;
     const item = await harness([
       fauxAssistantMessage(fauxToolCall("look", {}, { id: "call-look-image" }), {
@@ -138,7 +170,7 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
         observed = JSON.parse(JSON.stringify(context)) as Context;
         return fauxAssistantMessage(fauxText("image received"));
       },
-    ]);
+    ], { images: true });
     try {
       await item.runtime.promptTask();
       const results = toolResults(observed as Context);
@@ -530,6 +562,55 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
     }
   });
 
+  it("pauses at a settled boundary, lets the human work, and resumes", async () => {
+    // The whole point of pausing: the human gets the world at a step the
+    // kernel has finished writing, moves it, and the model's next action sees
+    // the move. A pause that blocked human moves too would be a freeze.
+    const item = await harness([
+      fauxAssistantMessage(fauxToolCall("check", {}, { id: "call-before-pause" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxText("first turn done")),
+      fauxAssistantMessage(fauxToolCall("check", {}, { id: "call-after-pause" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxText("second turn done")),
+    ], { singleToolPerTurn: true });
+    try {
+      await item.runtime.promptTask();
+      expect(item.runtime.paused).toBe(false);
+
+      item.runtime.pause();
+      expect(item.runtime.paused).toBe(true);
+
+      // A human move must still reach the kernel while the model is held.
+      const moved = await item.runtime.userAction("set_var", {
+        name: "T",
+        values: [-1, 0, 1, 0, 0, 0.2],
+      });
+      expect(moved.isError).toBe(false);
+      const snapshot = await item.runtime.kernel.snapshot();
+      expect(snapshot.state.vars).toEqual({ T: [[-1, 0], [1, 0], [0, 0.2]] });
+
+      // The model's next action is still parked; nothing new is journaled.
+      const seqWhilePaused = item.runtime.kernel.tip.journalSeq;
+      const running = item.runtime.prompt("carry on");
+      await new Promise((wake) => setTimeout(wake, 250));
+      expect(item.runtime.kernel.tip.journalSeq).toBe(seqWhilePaused);
+
+      item.runtime.resume();
+      expect(item.runtime.paused).toBe(false);
+      await running;
+      expect(item.runtime.kernel.tip.journalSeq).toBeGreaterThan(seqWhilePaused);
+
+      // The human's move is on the record as theirs, and the state replays.
+      const steps = await journalTrace(item.runtime);
+      expect(steps.some((step) => step.actor === "user")).toBe(true);
+    } finally {
+      await cleanup(item);
+    }
+  }, 30_000);
+
   it("refuses to let a human call the truth-making instruments", async () => {
     const item = await harness([fauxAssistantMessage(fauxText("idle"))]);
     try {
@@ -541,7 +622,10 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
     }
   });
 
-  it("rejects text-only models before starting a kernel process", async () => {
+  it("accepts a text-only model, and rejects it only for an image run", async () => {
+    // Vision is required by the CHANNEL, not by the harness: a text-only model
+    // can drive a numbers-first run end to end, and is refused before any
+    // kernel process starts only when the run would send it pictures.
     const root = await mkdtemp(join(tmpdir(), "simagent-p0-vision-"));
     const provider = `simagent-text-${++providerSequence}`;
     const faux = fauxProvider({
@@ -555,17 +639,33 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
     modelRuntime.registerNativeProvider(faux.provider);
     const model = modelRuntime.getModel(provider, "text-only");
     if (!model) throw new Error("text-only faux model missing");
-    expect(() => assertVisionModel(model)).toThrow(/requires a vision model/);
+    expect(() => assertVisionModel(model)).toThrow(/needs a vision model/);
+    // the message must say what to DO, not only what is wrong
+    expect(() => assertVisionModel(model)).toThrow(/Drop --images/);
     await expect(
       createSimAgentRuntime({
         problemId: "circumcenter-in-triangle",
-        outDir: join(root, "kernel"),
+        outDir: join(root, "vision-kernel"),
         sessionManager: SessionManager.inMemory(),
         modelRuntime,
         model,
+        images: true,
       }),
-    ).rejects.toThrow(/requires a vision model/);
-    await expect(readFile(join(root, "kernel", "kernel-journal.jsonl"), "utf8")).rejects.toThrow();
+    ).rejects.toThrow(/needs a vision model/);
+    await expect(
+      readFile(join(root, "vision-kernel", "kernel-journal.jsonl"), "utf8"),
+    ).rejects.toThrow();
+
+    const runtime = await createSimAgentRuntime({
+      problemId: "circumcenter-in-triangle",
+      outDir: join(root, "kernel"),
+      sessionManager: SessionManager.inMemory(),
+      modelRuntime,
+      model,
+    });
+    expect(runtime.images).toBe(false);
+    expect(runtime.description.systemPrompt).not.toContain("Images are ON");
+    await runtime.dispose();
     await rm(root, { recursive: true, force: true });
   });
 

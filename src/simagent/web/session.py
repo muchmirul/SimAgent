@@ -47,14 +47,17 @@ def _report_rank(report: SearchReport | None) -> int:
 
 
 class SandboxSession:
-    def __init__(self, spec: ProblemSpec, out_dir):
+    def __init__(self, spec: ProblemSpec, out_dir, seed: int = 0):
         self.spec = spec
         self.comp = spec.compiled()
         self.out = Path(out_dir)
         self.out.mkdir(parents=True, exist_ok=True)
         spec.save(self.out / "spec.json")
-        self.rng = np.random.default_rng(0)
-        self._hunt_seed = 0
+        # The starting configuration. Runs that must be independent (evaluation
+        # seeds) differ only here, so a fixed 0 would make every "seed" the same
+        # experiment repeated.
+        self.rng = np.random.default_rng(seed)
+        self._hunt_seed = seed
         self.world = World()
         for name, space in spaces_for(spec).items():
             self.world.add_free(name, space)

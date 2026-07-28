@@ -4,14 +4,27 @@ THIS PROJECT IS ONLY HARNESS, thinking or any thought must come from the model i
 AGENTS.md and CLAUDE.md are the same file, kept byte-identical on purpose so
 every tool reads one source of truth. Edit one, copy it to the other.
 
-Pi-managed harness for visualization-based, finite-dimensional math: a small
+Pi-managed harness for experience-based, finite-dimensional math: a small
 correctness-first kernel. The LLM reasons; the harness records only what it can
 execute or check; the Lean kernel is the sole authority on deduction. Read
 ARCHITECTURE.md before touching the kernel. Current baseline: v2 P0-P6 landed.
 
 core idea of sim agent is this :
-1. simagent is the harness on how to get of the best harness to routed models llm, to solve any math problem by experiencing doing math by viz and equation is just formalization. instead of just using text file. and gathering information from outside. doing it by first principle.
-2. as a toll human and ai agent can collaborate on solving, sometimes human get stuck agent help, and sometime human giving idea while agent stuck. this done by seamless ui that human can giving comment on the step that agent do.
+1. simagent is the harness that gives a routed llm the best way to solve a
+   math problem by EXPERIENCING it, not by reading a text file: the model acts
+   in a world (sample, nudge, refine) and the world answers back, from first
+   principles. NUMBERS-FIRST (decided 2026-07-27, todo.md step 0): the model's
+   senses are text and coordinates — exact margins, exact positions, `measure`
+   words — because current models read numbers exactly and pixels coarsely.
+   Equation is just formalization. Pictures are rendered from the same kernel
+   state, but their audience is the HUMAN; sending them to the model is a
+   per-run flag, default off, kept so evaluation can judge the image channel
+   with evidence instead of belief.
+2. as a tool human and ai agent collaborate on solving: sometimes the human is
+   stuck and the agent helps, sometimes the human gives the idea while the
+   agent is stuck. this happens in a seamless ui where the human comments on
+   the exact step the agent took — and the notebook's pictures exist for this,
+   the human's window into the run.
 
 Other docs, so you do not duplicate them here: ARCHITECTURE.md (kernel design +
 contributor rules), README.md (what the project is, for a newcomer),
@@ -54,8 +67,10 @@ output explains itself"). The first one governs the rest.
   result says in words that nothing checked it.
 - **Any model pi routes.** SimAgent harnesses whatever model pi selects; there
   is no blessed provider, and a coding model driving a run is normal. With no
-  `--provider/--model` the runtime takes the first authenticated VISION model
-  pi has, so the choice must never be silent: `KernelTransport.set_runtime`
+  `--provider/--model` the runtime takes the first authenticated model pi has
+  (a text-only model is a normal driver, since the senses are numbers; vision
+  is required only for an `--images` run), so the choice must never be silent:
+  `KernelTransport.set_runtime`
   records provider/model as run PROVENANCE (`runtime.json` plus the
   `agent_summary.md` header), the CLI prints it, and an unrecorded model is
   said plainly rather than left blank. It is deliberately not a journal record
@@ -70,13 +85,15 @@ output explains itself"). The first one governs the rest.
 SIMAGENT_LEAN=off .venv/bin/python -m pytest -q   # the no-toolchain path users have
 (cd agent && PI_OFFLINE=1 npm run build && PI_OFFLINE=1 npm test)  # pi suite
 .venv/bin/simagent bench                      # known-answer test, must stay 11/11
+.venv/bin/simagent eval --arms search         # does the LOOP help? offline floor arm
+.venv/bin/simagent eval --arms search text images --provider P --model M  # spends API calls
 .venv/bin/simagent list                       # bundled problems
 .venv/bin/simagent solve <id> [--trials N --seed S --render-manim]
 .venv/bin/simagent solve --conjecture "..."   # needs one authenticated pi model
 .venv/bin/simagent formalize "..." --out spec.json
 .venv/bin/simagent play <id>                  # interactive REPL; preview.png re-renders per command
 .venv/bin/simagent web                        # reasoning notebook on :8642 (problem in, visual reasoning cells out)
-.venv/bin/simagent agent <id>                 # also accepts --spec FILE or --conjecture "..."
+.venv/bin/simagent agent <id> [--images]      # also accepts --spec FILE or --conjecture "..."
 ```
 
 `.github/workflows/ci.yml` runs those four on every push and pull request, in
@@ -200,7 +217,45 @@ Each module is described once, here. State it nowhere else.
    model, and `--provider/--model` picks one. The answer shape is forced by a
    single tool whose parameters ARE the schema, and a `validate_claim()`
    repair loop quotes each failure back. Its closed-vocabulary prompt is
-   generated from registry `doc` strings.
+   generated from registry `doc` strings. It answers in exactly one of two
+   ways: a supported Claim, or a typed refusal (`FormalizeRefused`, never
+   retried). Substituting a NEARBY claim is forbidden, because the kernel would
+   then settle a different question under the user's words.
+- `evaluate.py` answers a question `bench` cannot: does ACTING in the world
+  help a model settle a claim? One `eval/1` manifest, three arms on the same
+  tasks, seeds and budget (`search` = no model, the floor; `text` = the
+  numbers-first loop; `images` = the same loop with pictures), and only
+  mechanical outcomes scored (certified solve rate, `verified_by`, turns, tool
+  errors, human interventions). The required improvement is declared IN the
+  manifest before anything runs, a seed whose first sample already settles the
+  claim is screened out and the skip is recorded, and `format_report` states
+  the gap without ever naming a winner. `separation()` also reports tasks the
+  floor already solves, because a task search settles says nothing about the
+  loop. Arms differ by ONE flag: same task, seed, budget and model, and the
+  `--seed` reaches `SandboxSession` so two seeds are two different starting
+  worlds rather than the same run twice.
+  FIRST LIVE RESULT (2026-07-28, `runs/eval-live/eval.json`,
+  openai-codex/gpt-5.6-sol, 3 seeds on `circumcenter-near-centroid`): search
+  0/3 certified, text 3/3 (median 9 turns), images 3/3 (median 11). Both beat
+  the +0.25 declared before the run. Images did not separate from text, which
+  is why numbers-first is the default and the image channel is a flag.
+- `intake.py` is the problem CONTRACT. It hashes the executable Claim,
+  restates every part of it in plain English (`describe_claim`: quantifier,
+  domain, assumptions, filter, margin meaning, verification limits), and
+  records the user's exact words with the formalizer's provider/model in
+  `intake.json`. Natural-language input starts `pending`: no agent runs until a
+  human approves that exact hash (`simagent agent --approve-claim HASH`, or the
+  notebook's 428 plus its approval cell). Re-formalizing changes the hash and
+  voids an old approval on its own. This review confirms the TRANSLATION only;
+  it never touches `verified_by`, and `answer.md` prints both the source text
+  and the review state. The web keeps the shown claim in a small bounded cache
+  keyed by its hash: formalizing is a model call and is NOT deterministic, so
+  re-formalizing on the approval request would produce a different claim, the
+  hash would never match, and the gate would be unpassable. A formalizer that
+  breaks (rather than refuses) answers 502 naming the model and the fix; the
+  model you pick in the notebook formalizes too, because the default is
+  whichever model pi lists first and small models often cannot make the
+  structured tool call at all.
 - `pipeline.py` orchestrates one full run (spec → search → certify → visualize
   → answer) into a self-describing directory: spec.json, report.json,
   preview.png, scene.json, scene_manim.py, answer.md, answer.tex,
@@ -229,8 +284,11 @@ Each module is described once, here. State it nowhere else.
 **Agent mode and the web notebook**
 
 - `agent.py` (`AgentRun`) owns kernel-side tool state: sandbox actions, trace,
-  proof candidates, finalization. No provider, no model loop. `look` returns a
-  vision image.
+  proof candidates, finalization. No provider, no model loop. `AgentRun(...,
+  images=False)` is the numbers-first switch: `look`/`view`/`imagine` always
+  WRITE their render (the notebook and trace need it) and attach it to the
+  model's content only when `images` is on, so `system_prompt(images)` must
+  describe the senses that run actually has.
 - `kernel_transport.py` is the provider-free, strict JSONL kernel boundary.
 - `agent/` is the TypeScript pi runtime, with
   `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` exact-pinned
@@ -259,6 +317,12 @@ Each module is described once, here. State it nowhere else.
   cells) and `kernel-journal.jsonl` (replayable calls and state hashes).
   Comments enter pi with `session.steer()` and are journaled as
   `user_comment`; the annotation must preserve the full kernel state hash.
+  `pause()`/`resume()` hold the model at its NEXT tool call, which is a settled
+  boundary: the previous action is journaled and the next has not begun. A tool
+  parked at that gate leaves the active batch, or a human move would wait for
+  the model that is waiting for the human. A picked 3D point carries its
+  variable and row (`scene.points(binds=...)`), so the human's move, nudge and
+  construct go through the same journaled user-action boundary as the model's.
   A human may also MOVE the world mid-run (`userAction` op → journal event
   `user_action`, tools limited to sample/set_var/nudge/construct): a comment
   can only suggest, and a stuck run often needs someone to place the point.

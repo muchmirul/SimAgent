@@ -132,11 +132,43 @@ def _dim_cap_notice(spec, proof) -> list[str]:
     ]
 
 
+def _source_lines(path: Path) -> list[str]:
+    """What the user actually asked, and whether anyone checked the translation.
+
+    Read from intake.json beside the answer. A verdict about a generated claim
+    means nothing to a reader who cannot see whether that claim is the question
+    they asked, so the answer states both or says the record is missing.
+    """
+    from .intake import INTAKE_FILE, Intake
+
+    source = path.parent / INTAKE_FILE
+    if not source.is_file():
+        return []
+    try:
+        intake = Intake.load(source)
+    except Exception:  # noqa: BLE001 - an unreadable record is reported, not fatal
+        return ["> Intake record present but unreadable; the source question cannot be shown.", ""]
+    if intake.source_kind != "conjecture":
+        return [f"**Source.** {intake.source_kind}: `{intake.source_text}` "
+                f"(claim `{intake.claim_hash[:12]}…`, no translation to review)", ""]
+    state = ("approved by a human" if intake.approved
+             else f"NOT approved (review state: {intake.review_state})")
+    return [
+        f"**You asked.** {intake.source_text.strip()}",
+        "",
+        f"**Translated by.** {intake.formalizer or 'unrecorded model'} "
+        f"into claim `{intake.claim_hash[:12]}…`, {state}. "
+        "This says whether the question below is yours; it says nothing about the mathematics.",
+        "",
+    ]
+
+
 def write_markdown(spec: ProblemSpec, report: SearchReport, path: Path, proof=None) -> None:
     check = report.witness_check or {}
     lines = [
         f"# {spec.title}",
         "",
+        *_source_lines(path),
         f"**Conjecture.** {spec.conjecture}",
         "",
         f"$${spec.latex}$$",

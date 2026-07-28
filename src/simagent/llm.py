@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -84,6 +85,20 @@ class ClaimModel(BaseModel):
     notes: str = ""
 
 
+class FormalizationModel(BaseModel):
+    """Either a claim or a refusal, never a substitute.
+
+    The two-field shape exists so "I cannot express this" has somewhere to go.
+    Without it the only way to answer is a claim, which turns every
+    inexpressible conjecture into a nearby expressible one and hides the swap.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    supported: bool
+    claim: Optional[ClaimModel] = None
+    refusal: str = ""
+
+
 def _registry_doc(name: str, registry: dict) -> str:
     lines = [f"### {name}"]
     for key, entry in registry.items():
@@ -106,9 +121,15 @@ def build_system_prompt() -> str:
 exploring math conjectures. Convert the user's conjecture into a native
 Claim: free entities in Spaces, a recipe of constructions, and a distinguished
 measure — ALL chosen from the closed registries below. You write NO code;
-you compose vocabulary. If the conjecture cannot be expressed with these
-registries, say so plainly in `notes` and pick the nearest faithful bounded
-form (or fail honestly).
+you compose vocabulary.
+
+Answer in exactly one of two ways. Either `supported: true` with a `claim`
+that states the user's conjecture, or `supported: false` with `refusal` naming
+what the registries cannot express. Do NOT substitute a nearby claim for one
+you cannot express: a different bound, a different inequality, or a finite
+range standing in for an unbounded one is a DIFFERENT question, and the
+harness would settle that one instead while reporting success. A refusal is a
+correct answer; a silent substitution is not.
 
 ## Spaces (free entities)
 Declare each with name, shape (e.g. [3, 2] = 3 points in R^2; [] = scalar),
@@ -151,13 +172,41 @@ Mathlib statement of the *positive* conjecture (the harness negates it if
 disproved); if no clean formulation exists, say so in a Lean comment. Use
 notes for caveats (discrete measures = evidence only; d > 3 = no Lean cert).
 
-## Example claim (this exact JSON shape)
+## Example claim (this exact JSON shape, as the `claim` field)
 {_example_claim_json()}
 """
 
 
 class FormalizeError(RuntimeError):
     pass
+
+
+class FormalizeRefused(FormalizeError):
+    """The formalizer said the conjecture is not expressible here.
+
+    Separate from FormalizeError because it is an ANSWER, not a breakdown: the
+    honest response to an out-of-vocabulary conjecture, and the thing a caller
+    should show the user instead of retrying.
+    """
+
+    def __init__(self, reason: str, formalizer: str = ""):
+        super().__init__(reason or "the formalizer refused without giving a reason")
+        self.reason = reason
+        self.formalizer = formalizer
+
+
+@dataclass
+class Formalization:
+    """A validated claim plus who made it and from what.
+
+    Provenance travels with the claim because a translation nobody can
+    attribute cannot be re-checked or reproduced.
+    """
+
+    claim: Claim
+    source_text: str
+    formalizer: str
+    attempts: int
 
 
 def _ask(
@@ -211,33 +260,67 @@ def formalize(
     provider: str | None = None,
     client=None,
 ) -> Claim:
-    """Conjecture text -> validated native Claim (with a repair loop)."""
+    """Conjecture text -> validated native Claim (with a repair loop).
+
+    Raises FormalizeRefused when the conjecture is outside the vocabulary.
+    Use `formalize_recorded` when the caller needs the provenance too.
+    """
+    return formalize_recorded(
+        conjecture_text, model=model, max_repairs=max_repairs, log=log,
+        provider=provider, client=client,
+    ).claim
+
+
+def formalize_recorded(
+    conjecture_text: str,
+    model: str | None = None,
+    max_repairs: int = 2,
+    log=print,
+    provider: str | None = None,
+    client=None,
+) -> Formalization:
+    """The same translation, keeping who did it and from what text."""
     prompt = f"Formalize this conjecture into a native Claim:\n\n{conjecture_text}"
     errors: list[str] = []
     for attempt in range(max_repairs + 1):
-        claim_dict, who = _ask(
-            ClaimModel,
+        answer, who = _ask(
+            FormalizationModel,
             system=build_system_prompt(),
             prompt=prompt,
             tool_name="emit_claim",
             tool_description=(
-                "Return the formalized claim. Every field is required unless the "
-                "schema marks it optional, and every kind must be a registry key "
-                "from the system prompt."
+                "Return either supported=true with a complete claim, or "
+                "supported=false with a refusal naming what cannot be expressed. "
+                "Every claim field is required unless the schema marks it optional, "
+                "and every kind must be a registry key from the system prompt."
             ),
             provider=provider or DEFAULT_PROVIDER,
             model=model or DEFAULT_MODEL,
             client=client,
         )
         log(f"[llm] formalize attempt {attempt + 1} answered by {who}")
-        try:
-            claim = claim_from_model_dump(claim_dict)
-            errors = validate_claim(claim)
-        except Exception as e:  # noqa: BLE001 - malformed structure is a repairable error
-            errors = [f"{type(e).__name__}: {e}"]
+        if not answer.get("supported", True):
+            reason = (answer.get("refusal") or "").strip()
+            log(f"[llm] formalizer refused: {reason}")
+            raise FormalizeRefused(reason, who)
+        claim_dict = answer.get("claim")
+        if claim_dict is None:
+            errors = ["supported=true but no claim was returned"]
+            claim_dict = {}
+        else:
+            try:
+                claim = claim_from_model_dump(claim_dict)
+                errors = validate_claim(claim)
+            except Exception as e:  # noqa: BLE001 - malformed structure is repairable
+                errors = [f"{type(e).__name__}: {e}"]
         if not errors:
             log(f"[llm] claim '{claim.id}' validated against the sandbox")
-            return claim
+            return Formalization(
+                claim=claim,
+                source_text=conjecture_text,
+                formalizer=who,
+                attempts=attempt + 1,
+            )
         log(f"[llm] claim failed validation: {errors}")
         # One user turn per attempt: the previous answer is quoted back rather
         # than replayed as an assistant turn, so every provider sees the same
@@ -248,7 +331,9 @@ def formalize(
             + json.dumps(claim_dict, indent=2)
             + "\n```\n\nIt failed sandbox validation:\n- "
             + "\n- ".join(errors)
-            + "\nReturn a corrected, complete claim (all fields, registry keys only)."
+            + "\nReturn a corrected, complete claim (all fields, registry keys only), "
+            "or supported=false if this conjecture cannot be stated with the "
+            "registries at all."
         )
     raise FormalizeError(f"claim failed validation after {max_repairs + 1} attempts: {errors}")
 

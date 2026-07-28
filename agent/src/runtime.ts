@@ -25,8 +25,9 @@ const BUILTIN_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls
 export class VisionCapabilityError extends Error {
   constructor(model: Model<any>) {
     super(
-      `SimAgent requires a vision model; ${model.provider}/${model.id} advertises input=` +
-        JSON.stringify(model.input),
+      `this run sends pictures, so it needs a vision model; ${model.provider}/${model.id} ` +
+        `advertises input=${JSON.stringify(model.input)}. Drop --images to run it ` +
+        `numbers-first, or pick a model that accepts images.`,
     );
     this.name = "VisionCapabilityError";
   }
@@ -83,11 +84,30 @@ export interface CreateSimAgentRuntimeOptions {
   replayThrough?: number;
   /** Product sessions use one kernel action per turn so every trace cell is branch-safe. */
   singleToolPerTurn?: boolean;
+  /**
+   * Send rendered pictures to the model too (default false). Numbers-first is
+   * the decided default; this is the evaluation arm that turns the image
+   * channel on, and it is also what makes vision a model requirement.
+   */
+  images?: boolean;
+  /** Starting configuration seed. Two runs that differ only here are the
+   * independent samples an evaluation needs; without it every seed is the
+   * same experiment repeated. */
+  seed?: number;
 }
 
-async function selectModel(runtime: ModelRuntime, requested?: Model<any>): Promise<Model<any>> {
+/**
+ * Vision is required only when this run actually sends pictures. SimAgent is
+ * numbers-first, so a text-only model is a normal driver; demanding vision
+ * from it would reject a model that can do the whole run.
+ */
+async function selectModel(
+  runtime: ModelRuntime,
+  requested?: Model<any>,
+  images = false,
+): Promise<Model<any>> {
   if (requested) {
-    assertVisionModel(requested);
+    if (images) assertVisionModel(requested);
     const auth = await runtime.checkAuth(requested.provider);
     if (auth === undefined) {
       throw new Error(`no standard Pi authentication is configured for ${requested.provider}`);
@@ -95,6 +115,11 @@ async function selectModel(runtime: ModelRuntime, requested?: Model<any>): Promi
     return requested;
   }
   const available = await runtime.getAvailable();
+  if (!images) {
+    const first = available[0];
+    if (!first) throw new Error("no authenticated Pi model is available");
+    return first;
+  }
   const vision = available.find((candidate) => candidate.input.includes("image"));
   if (!vision) throw new Error("no authenticated Pi vision model is available");
   return vision;
@@ -139,6 +164,25 @@ export class SimAgentRuntime {
   private disposed = false;
   private readonly singleToolPerTurn: boolean;
   private readonly bundledProblemId: string | undefined;
+  /** Whether this run's instruments send pictures; a branch must inherit it. */
+  readonly images: boolean;
+  /** The starting-configuration seed, so a branch replays the same world. */
+  readonly seed: number;
+  /**
+   * Pause held open while a human works. It gates the model's NEXT tool call,
+   * which is the settled boundary: the previous action is journaled and the
+   * next has not started, so the human can move the world and the model's
+   * first sight of it is the move itself.
+   */
+  private pauseGate: Promise<void> | null = null;
+  private releasePause: (() => void) | null = null;
+  /**
+   * Tool calls parked at that gate. They are NOT part of the active batch: a
+   * human action waits for the batch to drain, and a tool waiting for the
+   * human to finish would then be waiting for the human, who is waiting for
+   * it. Pausing would deadlock the very thing it exists to allow.
+   */
+  private readonly pausedToolCalls = new Set<string>();
 
   constructor(
     session: AgentSession,
@@ -148,7 +192,11 @@ export class SimAgentRuntime {
     resourceLoader: ResourceLoader,
     singleToolPerTurn: boolean,
     bundledProblemId: string | undefined,
+    images = false,
+    seed = 0,
   ) {
+    this.images = images;
+    this.seed = seed;
     this.session = session;
     this.kernel = kernel;
     this.modelRuntime = modelRuntime;
@@ -162,11 +210,8 @@ export class SimAgentRuntime {
         this.activeToolCalls.add(event.toolCallId);
       } else if (event.type === "tool_execution_end") {
         this.activeToolCalls.delete(event.toolCallId);
-        if (this.activeToolCalls.size === 0) {
-          const waiters = this.toolBatchWaiters;
-          this.toolBatchWaiters = [];
-          for (const resolveWaiter of waiters) resolveWaiter();
-        }
+        this.pausedToolCalls.delete(event.toolCallId);
+        this.releaseToolBatchWaiters();
       } else if (event.type === "turn_end") {
         void this.flushAssistantNarrative(event.message).then(() => this.recordCheckpoint());
       }
@@ -208,6 +253,16 @@ export class SimAgentRuntime {
       if (!this.steeringSourceToolCalls.has(context.toolCall.id)) {
         await this.steeringBoundary;
       }
+      // The pause boundary: the previous action is journaled, this one has not
+      // touched the kernel yet. Park here, and release the batch so a human
+      // move can reach the kernel while the model waits.
+      while (this.pauseGate) {
+        const gate = this.pauseGate;
+        this.pausedToolCalls.add(context.toolCall.id);
+        this.releaseToolBatchWaiters();
+        await gate;
+      }
+      this.pausedToolCalls.delete(context.toolCall.id);
       await this.flushAssistantNarrative(context.assistantMessage);
       const inheritedResult = await inherited?.(context, signal);
       if (inheritedResult?.block || !this.singleToolPerTurn) return inheritedResult;
@@ -294,7 +349,7 @@ export class SimAgentRuntime {
     if (!branchFile) throw new Error("Pi did not create a branched session file");
     const branchModel = this.session.model;
     if (!branchModel) throw new Error("source Pi session has no active model");
-    assertVisionModel(branchModel);
+    if (this.images) assertVisionModel(branchModel);
 
     const branchOptions: CreateSimAgentRuntimeOptions = {
       outDir,
@@ -308,6 +363,8 @@ export class SimAgentRuntime {
       replayJournal: this.kernel.tip.journalPath,
       replayThrough: known.kernelJournalSeq,
       singleToolPerTurn: this.singleToolPerTurn,
+      images: this.images,
+      seed: this.seed,
     };
     if (this.bundledProblemId !== undefined) branchOptions.problemId = this.bundledProblemId;
     else branchOptions.specPath = resolve(dirname(this.kernel.tip.journalPath), "spec.json");
@@ -320,8 +377,51 @@ export class SimAgentRuntime {
   }
 
   private waitForToolBatch(): Promise<void> {
-    if (this.activeToolCalls.size === 0) return Promise.resolve();
+    if (this.pendingToolCount() === 0) return Promise.resolve();
     return new Promise((resolveWaiter) => this.toolBatchWaiters.push(resolveWaiter));
+  }
+
+  private releaseToolBatchWaiters(): void {
+    if (this.pendingToolCount() !== 0) return;
+    const waiters = this.toolBatchWaiters;
+    this.toolBatchWaiters = [];
+    for (const resolveWaiter of waiters) resolveWaiter();
+  }
+
+  /** Active tools that are actually running, not parked at the pause gate. */
+  private pendingToolCount(): number {
+    let count = 0;
+    for (const id of this.activeToolCalls) {
+      if (!this.pausedToolCalls.has(id)) count += 1;
+    }
+    return count;
+  }
+
+  /** True while the model is held at a settled boundary. */
+  get paused(): boolean {
+    return this.pauseGate !== null;
+  }
+
+  /**
+   * Hold the model before its next action. Already-running tools finish, so
+   * the kernel is never left mid-write; what stops is the model taking a NEW
+   * step, which is what a human needs in order to work on a settled state.
+   */
+  pause(): void {
+    if (this.pauseGate) return;
+    this.pauseGate = new Promise<void>((release) => {
+      this.releasePause = release;
+    });
+  }
+
+  resume(): void {
+    const release = this.releasePause;
+    this.pauseGate = null;
+    this.releasePause = null;
+    release?.();
+    // A tool parked at the gate rejoins the batch; anyone waiting for the
+    // batch to drain must now wait for it again.
+    this.pausedToolCalls.clear();
   }
 
   async comment(text: string, target: Record<string, unknown>): Promise<void> {
@@ -467,7 +567,8 @@ export async function createSimAgentRuntime(
   const cwd = resolve(options.cwd ?? options.repoRoot ?? process.cwd());
   // Default construction deliberately uses Pi's standard auth/models locations.
   const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create());
-  const model = await selectModel(modelRuntime, options.model);
+  const images = options.images === true;
+  const model = await selectModel(modelRuntime, options.model, images);
 
   if ((options.problemId === undefined) === (options.specPath === undefined)) {
     throw new Error("provide exactly one of problemId or specPath");
@@ -479,6 +580,8 @@ export async function createSimAgentRuntime(
   if (options.repoRoot !== undefined) kernelOptions.repoRoot = options.repoRoot;
   if (options.replayJournal !== undefined) kernelOptions.replayJournal = options.replayJournal;
   if (options.replayThrough !== undefined) kernelOptions.replayThrough = options.replayThrough;
+  if (images) kernelOptions.images = true;
+  if (options.seed !== undefined) kernelOptions.seed = options.seed;
   const kernel = await KernelClient.start(kernelOptions);
 
   try {
@@ -547,6 +650,8 @@ export async function createSimAgentRuntime(
       resourceLoader,
       options.singleToolPerTurn ?? false,
       options.problemId,
+      images,
+      options.seed ?? 0,
     );
   } catch (error) {
     await kernel.terminate();

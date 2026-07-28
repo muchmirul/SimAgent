@@ -91,10 +91,13 @@ def _fit(payload: dict, limit: int = MAX_TOOL_CHARS) -> str:
     return text
 
 
-SYSTEM = """You are a mathematician placed inside SimAgent, a 3D math sandbox.
-You are embodied: `look` shows you the current configuration as a rendered
-image; the other tools move points and run the harness machinery. Use your
-eyes — geometry that looks wrong usually is wrong.
+SYSTEM = """You are a mathematician placed inside SimAgent, a math sandbox you
+act in. You are not reading a problem statement: you inhabit a configuration
+you can move, and the world answers every move with exact numbers. Your senses
+are numeric and verbal — `check` gives your exact coordinates, whether the
+claim holds and the margin; `measure` gives the qualitative description
+(inside/outside, which face, how near the boundary). The other tools move
+points and run the harness machinery.
 
 Your task: settle the conjecture with one of the ten classical proof methods
 (direct, contradiction, contrapositive, induction, cases, construction,
@@ -114,19 +117,17 @@ settles every n at once by a base case plus a non-decreasing step. For the
 other four methods, reason in the scene and finish with `submit_lean_proof`.
 
 Think in the scene, not in prose: form each hypothesis as a configuration you
-can look at, then act on it. Every act is traced — thought, move, resulting
-picture — and the harness translates each new state into equations for the
-record. Equations are the translation of what you see, not the medium of
-thought.
+can put numbers to, then act on it and read what came back. Every act is
+traced — thought, move, resulting state — and the harness translates each new
+state into equations for the record.
 
-Your senses go beyond `look`: `measure` describes the state qualitatively
-(inside/outside, which face, how near the boundary); `view kind=field` paints
-the margin over a 2D slice of configuration space — the red region is where
-the claim FAILS and the zero-contour is the SHAPE of the claim's boundary
-(recognize that shape and you have a conjecture); `view kind=sweep` plots the
-margin along one coordinate. `imagine` runs a thought experiment on a fork of
-the world (Einstein's move: picture it first); the mainline is untouched —
-re-issue the ops for real when the picture looks right.
+Instruments extend those senses. `view kind=field` reports the margin over a
+2D slice of configuration space: where the claim FAILS, how much of the slice
+fails, and whether the margin crosses zero inside it, which is the boundary of
+the claim. `view kind=sweep` reports the margin along one coordinate with its
+zero crossings. `look` reports the configuration as the renderer sees it.
+`imagine` runs a thought experiment on a fork of the world; the mainline is
+untouched, so re-issue the ops for real when the outcome is the one you want.
 
 Declare your line of attack with `plan` (method + one-line idea) before your
 first substantive act, and declare again whenever you switch strategy. The
@@ -154,9 +155,23 @@ declared approaches and scored predictions this run journaled, so an early
 step that has left your context is not lost. It restates the record and
 nothing more.
 
-Work economically: look, form a hypothesis, test it. Call one tool per turn so
-every notebook cell is a safe branch point. When the matter is settled (or you
-are honestly stuck), call `finish` with a summary."""
+Work economically: read the state, form a hypothesis, test it. Call one tool
+per turn so every notebook cell is a safe branch point. When the matter is
+settled (or you are honestly stuck), call `finish` with a summary."""
+
+# Pictures are rendered for the human on every run. Whether they are also sent
+# to the model is a per-run choice (AgentRun(images=...)), so the prompt has to
+# match what that run's instruments will actually return: telling a model to
+# use eyes it does not have is a dead end it cannot act on.
+VISION_NOTE = """
+Images are ON for this run: `look`, `view` and `imagine` return a rendered
+picture alongside their numbers. The picture and the numbers describe the same
+kernel state; where they disagree, the numbers are the state."""
+
+
+def system_prompt(images: bool = False) -> str:
+    """The system prompt for a run, matching that run's actual senses."""
+    return SYSTEM + (VISION_NOTE if images else "")
 
 TOOLS = [
     {
@@ -174,7 +189,7 @@ TOOLS = [
     },
     {
         "name": "look",
-        "description": "Render the current configuration and see it (image + status: your exact free coordinates, holds, margin).",
+        "description": "Report the current configuration as the renderer sees it: status (your exact free coordinates, holds, margin) plus, when this run sends images, the rendered picture.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -226,7 +241,7 @@ TOOLS = [
     },
     {
         "name": "view",
-        "description": "Render an analytical view. kind='field': margin painted over a 2D slice of configuration space (vary two coordinates of one row; zero-contour = the claim's boundary SHAPE — read it!). kind='sweep': margin along one coordinate with zero crossings. kind='trajectory': margin vs step so far.",
+        "description": "Measure the margin over a region rather than one point, and report what was found. kind='field': a 2D slice of configuration space (vary two coordinates of one row) reporting the failing fraction, the minimum margin, and whether the margin crosses zero inside the slice. kind='sweep': the margin along one coordinate with its zero crossings. kind='trajectory': the margin against step so far. Returns a rendered picture too when this run sends images.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -244,7 +259,7 @@ TOOLS = [
     },
     {
         "name": "imagine",
-        "description": "Thought experiment (Einstein-style): apply ops to a FORK of the world, see the outcomes and a ghost image, then the fork is discarded — the real configuration is untouched. ops entries: {\"op\":\"set\"|\"nudge\",\"target\":name,\"row\":int,\"values\"|\"delta\":[...]}. Kernel actions (certify/exhaust/hunt/lean) are forbidden here: truth only runs on committed state. If the imagined picture looks right, re-issue the ops for real.",
+        "description": "Thought experiment: apply ops to a FORK of the world, get each op's outcome (and a ghost image when this run sends images), then the fork is discarded — the real configuration is untouched. ops entries: {\"op\":\"set\"|\"nudge\",\"target\":name,\"row\":int,\"values\"|\"delta\":[...]}. Kernel actions (certify/exhaust/hunt/lean) are forbidden here: truth only runs on committed state. Re-issue the ops for real to keep the outcome.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -392,7 +407,7 @@ def _task_prompt(spec: ProblemSpec) -> str:
             f"{v.name}{v.shape or '[scalar]'} in [{v.low},{v.high}] ({v.kind})"
             for v in spec.domain
         )
-        + "\n\nSettle it. Start by looking at the world."
+        + "\n\nSettle it. The world is loaded and waiting for your first act."
     )
 
 
@@ -426,14 +441,21 @@ def _report_from_certify(spec: ProblemSpec, session: SandboxSession, c: dict) ->
 class AgentRun:
     """Provider-free tool state behind the pi transport. Cannot stamp verdicts."""
 
-    def __init__(self, spec: ProblemSpec, out_dir):
+    def __init__(self, spec: ProblemSpec, out_dir, *, images: bool = False,
+                 seed: int = 0):
         self.spec = spec
+        # Numbers-first: the model's senses are text and coordinates. Renders
+        # are always written for the human notebook; ``images`` decides only
+        # whether they are ALSO put into the model's context, so evaluation can
+        # compare the two channels on the same kernel.
+        self.images = bool(images)
         self.out = Path(out_dir)
         self.out.mkdir(parents=True, exist_ok=True)
         (self.out / "looks").mkdir(exist_ok=True)
         (self.out / "views").mkdir(exist_ok=True)
         (self.out / "imagined").mkdir(exist_ok=True)
-        self.session = SandboxSession(spec, self.out)
+        self.seed = int(seed)
+        self.session = SandboxSession(spec, self.out, seed=self.seed)
         self.looks = 0
         self.seq = 0
         self.declared_plans: list[dict] = []  # narrative intent, never the verdict
@@ -570,6 +592,16 @@ class AgentRun:
             "stamps what you actually establish."
         )
 
+    def _image_block(self, path: Path) -> list[dict]:
+        """The rendered file as a model content block, or nothing when this run
+        keeps pictures for the human only. The file is written either way, so
+        the trace records the same evidence in both modes."""
+        if not self.images:
+            return []
+        data = base64.standard_b64encode(path.read_bytes()).decode()
+        return [{"type": "image",
+                 "source": {"type": "base64", "media_type": "image/png", "data": data}}]
+
     def _t_look(self):
         self.looks += 1
         path = self.out / "looks" / f"look_{self.looks:03d}.png"
@@ -577,12 +609,11 @@ class AgentRun:
         if not scene:
             return "scene could not be built (degenerate configuration?)"
         mpl.render_png(scene, path, title=self.spec.title)
-        self._step_image = f"looks/{path.name}"  # what the agent saw, for the trace
-        data = base64.standard_b64encode(path.read_bytes()).decode()
-        return [
-            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
-            {"type": "text", "text": f"status: {self._status()}"},
-        ]
+        self._step_image = f"looks/{path.name}"  # what was rendered, for the trace
+        blocks = self._image_block(path)
+        if not blocks:
+            return f"status: {self._status()}"
+        return [*blocks, {"type": "text", "text": f"status: {self._status()}"}]
 
     def _t_sample(self, seed: int | None = None):
         self.session.sample(seed)
@@ -630,11 +661,11 @@ class AgentRun:
             raise ValueError(f"unknown view kind {kind!r}")
         self._step_image = f"views/{path.name}"
         self._step_extra = {"view": meta}
-        data = base64.standard_b64encode(path.read_bytes()).decode()
-        return [
-            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
-            {"type": "text", "text": f"view metadata: {json.dumps(meta, default=str)}"},
-        ]
+        text = f"view metadata: {json.dumps(meta, default=str)}"
+        blocks = self._image_block(path)
+        if not blocks:
+            return text
+        return [*blocks, {"type": "text", "text": text}]
 
     _IMAGINE_OPS = ("set", "nudge", "construct", "remove")
 
@@ -697,15 +728,15 @@ class AgentRun:
             views_mod.render_ghost(base_scene, hyp_scene, path,
                                    title=f"imagined — {self.spec.title}")
             self._step_image = f"imagined/{path.name}"
-            data = base64.standard_b64encode(path.read_bytes()).decode()
-            content.append({"type": "image",
-                            "source": {"type": "base64", "media_type": "image/png", "data": data}})
+            content.extend(self._image_block(path))
         summary = {
             "imagined": True,
             "mainline_unchanged": True,
             "outcomes": outcomes,
-            "note": "fork discarded — re-issue the ops for real if the picture looks right",
+            "note": "fork discarded — re-issue the ops for real to keep this outcome",
         }
+        if not content:
+            return _fit(summary)
         content.append({"type": "text", "text": _fit(summary)})
         return content
 

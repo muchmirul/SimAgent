@@ -180,8 +180,10 @@ exact verdict. `help` lists everything.
 
 Pi owns the model loop, provider authentication, steering, events, and
 conversation branches. Python still owns every world action, exact check,
-Lean check, and verdict. The model sees the scene through `look` and acts only
-through the closed SimAgent tool set: `plan`, `measure`, `view`, `imagine`,
+Lean check, and verdict. The model reads the world in exact numbers (`check`
+gives its coordinates, whether the claim holds, and the margin; `measure` gives
+the qualitative description) and acts only through the closed SimAgent tool
+set: `plan`, `measure`, `view`, `imagine`,
 `construct`, `expect`, movement/search tools, `certify`, Lean submission, and
 `finish`.
 
@@ -200,8 +202,11 @@ cd ..
   --provider openai-codex --model gpt-5.6-sol
 ```
 
-There is no blessed model. Give no flags and pi routes the first authenticated
-**vision** model it has, since the agent works by looking. Whichever model runs,
+There is no blessed model, and no vision requirement: SimAgent is
+**numbers-first**, so a text-only model can drive a whole run. Give no flags and
+pi routes the first authenticated model it has. Pictures are rendered for the
+notebook on every run; `--images` also sends them to the model, and only that
+needs a vision model. Whichever model runs,
 the run records it: `runtime.json`, the header of `agent_summary.md`, and a
 `Model: <provider>/<model>` line printed at the end. That record is provenance,
 not a verdict, and it is what makes "the agent stalled here" mean something.
@@ -302,17 +307,25 @@ Lean to reach 11/11.
 ## Honest scope
 
 This will not crack the Hodge conjecture — deep conjectures aren't finitely
-checkable by simulation. What the harness gives you is the *substrate* the
-vision needs: conjecture → playable world → automated exploration → exact
-certificates when falsifiable → formal skeletons when not. The interesting
+checkable by simulation. What the harness gives you is the *substrate*:
+conjecture → an approved, executable claim → a playable world → exploration →
+exact certificates when falsifiable → formal skeletons when not. The interesting
 work is growing the sandbox vocabulary (new domains) and closing the Lean
 loop.
 
 ## What's built
 
+- `simagent eval` — does acting in the world beat blind search? Same tasks,
+  same budget, three arms (search / numbers-only loop / loop with pictures),
+  mechanical scores only, threshold declared before the run. First live result
+  (`runs/eval-live/eval.json`, gpt-5.6-sol, 3 seeds): search 0/3 certified,
+  both model arms 3/3
+- Problem contract — plain English is translated, then SHOWN to you and
+  approved by hash before any agent runs; a formalizer that cannot express your
+  conjecture refuses rather than substituting a nearby one (`intake.json`)
 - `simagent play` — interactive sandbox REPL with a live-updating 3D preview
-- `simagent web` — reasoning notebook: problem in, visual chain of thought out (live)
-- `simagent agent` — embodied LLM (vision + tools) through authenticated pi providers
+- `simagent web` — reasoning notebook: problem in, the run's chain of thought out, with comment, branch, pause and direct point-moving (live)
+- `simagent agent` — an LLM acting in the world (numbers-first tools; `--images` adds pictures) through authenticated pi providers
 - Proof kernel: ten classical methods, `verified_by` trust ladder
 - Lean integration: generated core-Lean certificates (`decide`, axiom-free) for
   counterexample / construction / exhaustion; fail-closed checker

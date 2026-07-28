@@ -82,6 +82,14 @@ export interface KernelClientOptions {
   pythonPath?: string;
   replayJournal?: string;
   replayThrough?: number;
+  /**
+   * Send rendered pictures to the model as well as numbers. Default false:
+   * the model's senses are text and coordinates, and renders still land on
+   * disk for the notebook. The eval arms flip this on the same kernel.
+   */
+  images?: boolean;
+  /** Starting configuration seed; independent evaluation runs differ only here. */
+  seed?: number;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -154,6 +162,8 @@ export class KernelClient {
     if (options.replayThrough !== undefined) {
       args.push("--replay-through", String(options.replayThrough));
     }
+    if (options.images === true) args.push("--images");
+    if (options.seed !== undefined) args.push("--seed", String(options.seed));
 
     const child = spawn(pythonPath, args, {
       cwd: repoRoot,

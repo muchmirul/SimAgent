@@ -35,7 +35,7 @@ from typing import Any, TextIO
 
 import numpy as np
 
-from .agent import AgentRun, SYSTEM, TOOLS, _task_prompt
+from .agent import AgentRun, SYSTEM, TOOLS, _task_prompt, system_prompt
 from .library import get as get_bundled
 from .spec import ProblemSpec
 
@@ -231,6 +231,8 @@ class KernelTransport:
         *,
         replay_journal: str | Path | None = None,
         replay_through: int | None = None,
+        images: bool = False,
+        seed: int = 0,
     ):
         if replay_journal is None and replay_through is not None:
             raise ValueError("replay_through requires replay_journal")
@@ -238,7 +240,7 @@ class KernelTransport:
         journal_path = self.out / JOURNAL_FILE
         if journal_path.exists():
             raise FileExistsError(f"refusing to overwrite existing journal: {journal_path}")
-        self.run = AgentRun(spec, self.out)
+        self.run = AgentRun(spec, self.out, images=images, seed=seed)
         self.path = journal_path
         self._fh = self.path.open("x", encoding="utf-8")
         self._closed = False
@@ -282,10 +284,16 @@ class KernelTransport:
             "journalVersion": JOURNAL_VERSION,
             "specId": self.run.spec.id,
             "title": self.run.spec.title,
-            "systemPrompt": SYSTEM,
+            "systemPrompt": system_prompt(self.run.images),
             "taskPrompt": _task_prompt(self.run.spec),
             "tools": TOOLS,
             "journalPath": str(self.path.resolve()),
+            # which sensory channel this run gave the model, so a trace can be
+            # read (and an evaluation arm identified) long after the run
+            "images": self.run.images,
+            # which starting configuration this run got; two runs that differ
+            # only here are the independent samples an evaluation needs
+            "seed": self.run.seed,
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -636,6 +644,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--replay-journal")
     parser.add_argument("--replay-through", type=int)
+    parser.add_argument("--seed", type=int, default=0,
+                        help="seed for the starting configuration (default 0)")
+    parser.add_argument(
+        "--images",
+        action="store_true",
+        help="also send rendered pictures to the model (default: numbers only; "
+             "renders are written for the notebook either way)",
+    )
     return parser
 
 
@@ -648,6 +664,8 @@ def main(argv: list[str] | None = None) -> int:
             args.out_dir,
             replay_journal=args.replay_journal,
             replay_through=args.replay_through,
+            images=args.images,
+            seed=args.seed,
         )
         serve(transport)
         return 0

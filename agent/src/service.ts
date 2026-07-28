@@ -84,6 +84,7 @@ async function dispatch(frame: RequestFrame): Promise<unknown> {
     }
     if (typeof frame.maxTurns === "number") request.maxTurns = frame.maxTurns;
     if (typeof frame.runBase === "string") request.runBase = frame.runBase;
+    if (typeof frame.images === "boolean") request.images = frame.images;
     return controller.start(request);
   }
   if (op === "status") return controller.status(String(frame.run ?? ""));
@@ -114,6 +115,8 @@ async function dispatch(frame: RequestFrame): Promise<unknown> {
           : {},
     });
   }
+  if (op === "pause") return controller.pause(String(frame.run ?? ""));
+  if (op === "resume") return controller.resume(String(frame.run ?? ""));
   if (op === "stop") return controller.stop(String(frame.run ?? ""));
   if (op === "branch") {
     const request: BranchRunRequest = { step: Number(frame.step) };

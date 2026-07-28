@@ -38,23 +38,107 @@ def _cmd_bench(args) -> int:
     return 0 if all(r.ok for r in rows) else 1
 
 
-def _resolve_spec(args) -> ProblemSpec:
-    if args.spec:
-        return ProblemSpec.load(args.spec)
-    if args.problem:
-        return get(args.problem)
-    if args.conjecture:
-        from .llm import formalize
+def _cmd_eval(args) -> int:
+    """Does the loop help? bench cannot say; this can.
 
-        return formalize(
-            args.conjecture, model=args.model, provider=getattr(args, "provider", None)
+    Model arms cost real API calls, so nothing runs until the arms are named.
+    """
+    from . import evaluate
+
+    manifest = evaluate.load_manifest(args.manifest)
+    arms = tuple(args.arms or ["search"])
+    unknown = [a for a in arms if a not in evaluate.ARMS]
+    if unknown:
+        raise SystemExit(f"unknown arm(s) {unknown}; choose from {list(evaluate.ARMS)}")
+    if args.dry_run:
+        print(json.dumps(manifest, indent=2))
+        return 0
+    if args.provider or args.model:
+        if not (args.provider and args.model):
+            raise SystemExit("--provider and --model must be given together")
+    out = args.out or str(Path("runs") / f"eval-{manifest.get('name', 'run')}")
+    report = evaluate.run(manifest, out, arms=arms, provider=args.provider,
+                          model=args.model)
+    print()
+    print(evaluate.format_report(report))
+    print(f"\nRecord: {Path(out) / 'eval.json'}")
+    return 0
+
+
+def _resolve_spec(args) -> ProblemSpec:
+    return _resolve_with_intake(args)[0]
+
+
+def _resolve_with_intake(args):
+    """The spec plus the record of where it came from.
+
+    Every entry point goes through here so no run can start without saying what
+    the user asked and who translated it.
+    """
+    from . import intake as intake_mod
+    from .llm import FormalizeError as FormalizeErr, FormalizeRefused
+
+    if args.spec:
+        spec = ProblemSpec.load(args.spec)
+        return spec, intake_mod.record(spec, str(args.spec), "spec-file")
+    if args.problem:
+        spec = get(args.problem)
+        return spec, intake_mod.record(spec, args.problem, "bundled")
+    if args.conjecture:
+        from .core.claim import Claim
+        from .llm import formalize_recorded
+
+        # Approving names ONE claim by hash. Re-formalizing here would produce
+        # a differently worded claim with a different hash, so the approval
+        # could never match and the gate would be unpassable. Load back the
+        # exact claim that was shown instead.
+        approved = getattr(args, "approve_claim", None)
+        pending = intake_mod.load_pending(approved) if approved else None
+        if pending is not None:
+            return Claim.from_json(pending.claim_json), pending
+
+        try:
+            made = formalize_recorded(
+                args.conjecture, model=args.model,
+                provider=getattr(args, "provider", None),
+            )
+        except FormalizeErr as broke:
+            # Not a refusal: the model could not produce the structured answer.
+            # A traceback here would read as a harness crash, which it is not.
+            raise SystemExit(
+                f"The formalizer could not answer.\n  {broke}\n"
+                "  Name a model with --provider/--model: with none given, pi uses "
+                "whichever model it lists first, and not every model supports the "
+                "structured tool call the formalizer needs."
+            ) from broke
+        except FormalizeRefused as refused:
+            # A refusal is an answer, not a crash: the vocabulary cannot state
+            # this conjecture, and inventing a nearby one would settle a
+            # different question under the user's words.
+            raise SystemExit(
+                "The formalizer refused this conjecture rather than substitute a "
+                f"nearby one.\n  Reason: {refused.reason}\n"
+                f"  Refused by: {refused.formalizer or 'unrecorded model'}"
+            ) from refused
+        return made.claim, intake_mod.record(
+            made.claim, made.source_text, "conjecture", formalizer=made.formalizer,
         )
     raise SystemExit("give a bundled problem id, --spec spec.json, or --conjecture 'text' (see `simagent list`)")
 
 
 def _cmd_solve(args) -> int:
-    spec = _resolve_spec(args)
+    spec, intake = _resolve_with_intake(args)
     out = args.out or str(Path("runs") / f"{spec.id}-seed{args.seed}")
+    Path(out).mkdir(parents=True, exist_ok=True)
+    intake.save(out)
+    if intake.source_kind == "conjecture":
+        # A translated question is shown before the run, because this is the
+        # last moment the reader can tell the harness it is answering the
+        # wrong thing.
+        from . import intake as intake_mod
+
+        print(intake_mod.render_text(intake))
+        print()
     result = run_problem(
         spec,
         out,
@@ -68,6 +152,8 @@ def _cmd_solve(args) -> int:
     for line in result.log:
         print(f"  {line}")
     print(f"\nVerdict: {answer_mod.verdict_text(result.report, result.proof)}")
+    print(f"Asked: {intake.source_text.strip()}")
+    print(f"Claim reviewed: {intake.review_state} (claim {intake.claim_hash[:12]}…)")
     print(f"Run dir: {result.out_dir}")
     for name, path in sorted(result.artifacts.items()):
         print(f"  {name:12s} {path}")
@@ -88,27 +174,45 @@ def _cmd_play(args) -> int:
 
 
 def _cmd_agent(args) -> int:
+    from . import intake as intake_mod
+
+    spec, intake = _resolve_with_intake(args)
     if args.problem:
-        spec = get(args.problem)
         source_args = ["--problem-id", args.problem]
     elif args.spec:
-        spec = ProblemSpec.load(args.spec)
         source_args = ["--spec", str(Path(args.spec).resolve())]
-    elif args.conjecture:
-        from .llm import formalize
-
-        spec = formalize(args.conjecture, model=args.model, provider=args.provider)
-        source_args = []
     else:
-        raise SystemExit(
-            "give a bundled problem id, --spec spec.json, or --conjecture 'text' (see `simagent list`)"
-        )
+        source_args = []
     out = Path(args.out or Path("runs") / f"agent-{spec.id}").resolve()
     if args.conjecture:
         out.mkdir(parents=True, exist_ok=True)
         spec_path = out / "input.spec.json"
         spec.save(spec_path)
         source_args = ["--spec", str(spec_path)]
+    out.mkdir(parents=True, exist_ok=True)
+    if getattr(args, "approve_claim", None):
+        try:
+            intake.approve(args.approve_claim)
+        except ValueError as exc:
+            intake.save(out)
+            raise SystemExit(f"{exc}\n\n{intake_mod.render_text(intake)}") from exc
+    intake.save(out)
+    if intake.needs_approval:
+        # The gate: a model translated the user's words, and nobody has said
+        # the translation is right. Running now would settle whatever the
+        # translation says while reporting it as the user's question.
+        # The claim is kept so approving it re-uses THIS one rather than paying
+        # for a fresh formalization that would carry a different hash.
+        intake_mod.save_pending(intake)
+        print(intake_mod.render_text(intake))
+        raise SystemExit(
+            "\nThis claim has not been approved, so no agent will run.\n"
+            "Read the claim above. If it is your question, re-run the same "
+            "command with:\n"
+            f"  --approve-claim {intake.claim_hash}"
+        )
+    if intake.source_kind == "conjecture":
+        print(f"Approved claim {intake.claim_hash[:12]}… translated by {intake.formalizer}")
     repo_root = Path(__file__).resolve().parents[2]
     pi_cli = Path(os.environ.get("SIMAGENT_PI_CLI", repo_root / "agent" / "dist" / "cli.js"))
     if not pi_cli.is_file():
@@ -129,7 +233,18 @@ def _cmd_agent(args) -> int:
         args.thinking,
         "--max-turns",
         str(args.max_turns),
+        "--images",
+        "true" if args.images else "false",
     ]
+    # flush=True: the child's stderr is unbuffered, so without this a failure
+    # from the runtime prints BEFORE this line and reads as if the run started.
+    print(
+        "Senses: pictures are sent to the model as well as numbers."
+        if args.images
+        else "Senses: numbers and text only (--images adds pictures). "
+             "Renders are still written for the notebook.",
+        flush=True,
+    )
     if args.provider or args.model:
         if not (args.provider and args.model):
             raise SystemExit("--provider and --model must be given together")
@@ -137,7 +252,8 @@ def _cmd_agent(args) -> int:
     else:
         print(
             "no --provider/--model given: pi routes the first authenticated "
-            "vision model it has. SimAgent harnesses whichever one that is; "
+            + ("vision " if args.images else "")
+            + "model it has. SimAgent harnesses whichever one that is; "
             "the run records it in runtime.json and agent_summary.md."
         )
     code = subprocess.run(command, cwd=repo_root, check=False).returncode
@@ -226,6 +342,24 @@ def main(argv=None) -> int:
     b.add_argument("--seed", type=int, default=0)
     b.set_defaults(fn=_cmd_bench)
 
+    e = sub.add_parser(
+        "eval",
+        help="does the loop help? same tasks, same budget, several arms, mechanical scores",
+    )
+    e.add_argument("--manifest", help="path to an eval/1 manifest (default: the bundled one)")
+    e.add_argument(
+        "--arms", nargs="+", metavar="ARM",
+        help="which arms to run: search (offline floor), text (numbers-first loop), "
+             "images (the same loop with pictures). Default: search only, because "
+             "the model arms spend real API calls",
+    )
+    e.add_argument("--provider", help="pi provider id (requires --model)")
+    e.add_argument("--model", help="pi model id (requires --provider)")
+    e.add_argument("--out", help="output directory (default runs/eval-<name>)")
+    e.add_argument("--dry-run", action="store_true",
+                   help="print the manifest that would run and stop")
+    e.set_defaults(fn=_cmd_eval)
+
     s = sub.add_parser("solve", help="run the full pipeline on a conjecture")
     s.add_argument("problem", nargs="?", help="bundled problem id (see `simagent list`)")
     s.add_argument("--spec", help="path to a spec.json (e.g. from `simagent formalize`)")
@@ -245,7 +379,7 @@ def main(argv=None) -> int:
     pl.add_argument("--out", help="play directory (default runs/play-<id>)")
     pl.set_defaults(fn=_cmd_play)
 
-    a = sub.add_parser("agent", help="let a pi-managed LLM live in the sandbox: see, act, prove")
+    a = sub.add_parser("agent", help="let a pi-managed LLM live in the sandbox: act, measure, prove")
     a.add_argument("problem", nargs="?", help="bundled problem id (see `simagent list`)")
     a.add_argument("--spec", help="path to a spec.json")
     a.add_argument("--conjecture", help="natural-language conjecture (formalized first)")
@@ -257,6 +391,19 @@ def main(argv=None) -> int:
         default="medium",
     )
     a.add_argument("--max-turns", type=int, default=40)
+    a.add_argument(
+        "--images",
+        action="store_true",
+        help="also send rendered pictures to the model (default: numbers and "
+             "text only; renders are written for the notebook either way, and "
+             "this flag makes vision a model requirement)",
+    )
+    a.add_argument(
+        "--approve-claim",
+        metavar="HASH",
+        help="approve the formalized claim with this exact hash (required before an "
+             "agent runs on --conjecture input; the hash is printed by a first run)",
+    )
     a.add_argument("--out", help="output directory (default runs/agent-<id>)")
     a.set_defaults(fn=_cmd_agent)
 

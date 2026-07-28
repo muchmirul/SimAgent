@@ -180,8 +180,15 @@ class PiAgentClient:
         thinking_level: str = "medium",
         max_turns: int = 40,
         run_base: str | None = None,
+        images: bool = False,
     ) -> dict:
-        payload: dict[str, Any] = {"thinkingLevel": thinking_level, "maxTurns": max_turns}
+        payload: dict[str, Any] = {
+            "thinkingLevel": thinking_level,
+            "maxTurns": max_turns,
+            # numbers-first: pictures go to the notebook, and to the model only
+            # when this run is the image arm
+            "images": bool(images),
+        }
         if problem_id is not None:
             payload["problemId"] = problem_id
         if spec_path is not None:
@@ -202,6 +209,13 @@ class PiAgentClient:
 
     def comment(self, run: str, text: str, target: dict) -> dict:
         return self._request("comment", run=run, text=text, target=target)
+
+    def pause(self, run: str) -> dict:
+        """Hold the model at its next settled boundary; human moves still run."""
+        return self._request("pause", run=run)
+
+    def resume(self, run: str) -> dict:
+        return self._request("resume", run=run)
 
     def user_action(self, run: str, tool: str, args: dict) -> dict:
         """The human's own world move inside a live run (transport only)."""

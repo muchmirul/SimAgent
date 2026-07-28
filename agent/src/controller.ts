@@ -28,6 +28,8 @@ export interface StartRunRequest {
   thinkingLevel?: CreateSimAgentRuntimeOptions["thinkingLevel"];
   maxTurns?: number;
   runBase?: string;
+  /** Send pictures to the model too. Default false: numbers-first. */
+  images?: boolean;
 }
 
 export interface CommentRequest {
@@ -61,6 +63,8 @@ export interface RunStatusView {
   error: string | null;
   proof: { method: string; verified_by: string } | null;
   checkpoints: BranchCheckpoint[];
+  /** True while the model is held at a settled boundary for a human to work. */
+  paused: boolean;
 }
 
 export class ControllerError extends Error {
@@ -298,6 +302,7 @@ export class RunController {
         cwd: this.cwd,
         thinkingLevel: request.thinkingLevel ?? "medium",
         singleToolPerTurn: true,
+        images: request.images === true,
       };
       if (request.problemId !== undefined) runtimeOptions.problemId = request.problemId;
       if (request.specPath !== undefined) runtimeOptions.specPath = request.specPath;
@@ -348,6 +353,7 @@ export class RunController {
       error: run.error,
       proof: run.proof,
       checkpoints: [...run.runtime.getCheckpoints()],
+      paused: run.runtime.paused,
     };
   }
 
@@ -404,6 +410,30 @@ export class RunController {
       traceStep: result.traceStep,
       isError: result.isError,
     };
+  }
+
+  /**
+   * Hold the model at its next settled boundary so a human can work on the
+   * state. Running tools finish; only a NEW model action waits. Human moves
+   * and comments still go through, which is the point of pausing.
+   */
+  pause(name: string): { run: string; paused: boolean } {
+    const run = this.runs.get(name);
+    if (!run) throw new ControllerError("NOT_FOUND", "unknown agent job");
+    if (run.status !== "running") {
+      throw new ControllerError("CONFLICT", `session is not running (status: ${run.status})`);
+    }
+    run.runtime.pause();
+    this.pushEvent(run, "paused");
+    return { run: name, paused: true };
+  }
+
+  resume(name: string): { run: string; paused: boolean } {
+    const run = this.runs.get(name);
+    if (!run) throw new ControllerError("NOT_FOUND", "unknown agent job");
+    run.runtime.resume();
+    this.pushEvent(run, "resumed");
+    return { run: name, paused: false };
   }
 
   async stop(name: string): Promise<{ run: string; status: string }> {

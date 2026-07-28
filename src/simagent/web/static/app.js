@@ -19,8 +19,9 @@ async function api(path, body) {
   if (!r.ok) {
     let detail = r.statusText;
     try { detail = (await r.json()).detail ?? detail; } catch { /* ignore */ }
-    const err = new Error(detail);
+    const err = new Error(typeof detail === 'string' ? detail : (detail.error ?? r.statusText));
     err.status = r.status;
+    err.detail = detail;   // structured refusals (approval required, out of vocabulary)
     throw err;
   }
   return r.json();
@@ -478,6 +479,22 @@ async function openRun(run) {
     $('statusGut').textContent = '⋯';
     nb.tracePoll = setInterval(() => pullTrace().catch(() => {}), 1400);
   }
+  // A session opened in a second tab (or after a reload) is still YOUR session
+  // if it is running. Without this the page can watch it but not pause, stop or
+  // move a point, which is the one moment a human most wants to reach in.
+  await adoptIfLive(run);
+}
+
+async function adoptIfLive(run) {
+  try {
+    const status = await api(`/api/agent/${encodeURIComponent(run)}/status`);
+    if (TERMINAL.includes(status.status)) return;
+    nb.job = true;
+    $('btnStop').disabled = false;
+    $('btnPause').disabled = false;
+    setPaused(status.paused === true);
+    startJobPolling(run);
+  } catch { /* no control plane for this run: it is a finished trace on disk */ }
 }
 
 // ------------------------------------------------------ comments & branches --
@@ -635,6 +652,7 @@ function startJobPolling(run) {
       if (TERMINAL.includes(st.status)) {
         clearInterval(nb.statusPoll); nb.statusPoll = null;
         $('btnStop').disabled = true;
+        $('btnPause').disabled = true;
         refreshRuns().catch(() => {});
         setTimeout(() => {
           if (!nb.done && nb.tracePoll) { clearInterval(nb.tracePoll); nb.tracePoll = null; }
@@ -654,15 +672,98 @@ async function runSession(body) {
     history.replaceState(null, '', `?run=${encodeURIComponent(run)}`);
     $('runMsg').textContent = `session: ${run}`;
     $('btnStop').disabled = false;
+    $('btnPause').disabled = false;
+    setPaused(false);
     $('btnRestart').disabled = false;
     setStatus(body.conjecture ? 'formalizing your conjecture into a spec…' : 'pi agent session starting…');
     startJobPolling(run);
     nb.tracePoll = setInterval(() => pullTrace().catch(() => { /* trace not on disk yet */ }), 1400);
   } catch (e) {
-    $('runMsg').textContent = e.status === 409 ? `busy: ${e.message}` : `error: ${e.message}`;
+    // 428: a model turned your words into an executable claim, and nobody has
+    // said that claim is your question yet. Showing the claim IS the fix; a
+    // bare error would leave the user with no way to proceed.
+    if (e.status === 428 && e.detail?.error === 'claim_approval_required') {
+      showClaimApproval(e.detail, body);
+    } else if (e.status === 422 && e.detail?.error === 'formalization_refused') {
+      showFormalizeRefusal(e.detail);
+    } else if (e.status === 502 && e.detail?.error === 'formalization_failed') {
+      showFormalizeBreakage(e.detail);
+    } else {
+      $('runMsg').textContent = e.status === 409 ? `busy: ${e.message}` : `error: ${e.message}`;
+    }
   } finally {
     $('btnRun').disabled = false;
   }
+}
+
+// The approval gate, as a page: what you asked, what will actually run, and
+// one button that approves THIS claim by its hash. Re-formalizing changes the
+// hash, so an approval never carries over to a different claim.
+function showClaimApproval(detail, body) {
+  document.getElementById('claimGate')?.remove();
+  const box = el('section', 'cell claimgate');
+  box.id = 'claimGate';
+  box.appendChild(el('div', 'gut', 'Check:'));
+  const inner = el('div');
+  inner.appendChild(el('h3', null, 'Is this your question?'));
+  inner.appendChild(el('div', 'caption',
+    `"${detail.source_text}" was translated by ${detail.formalizer || 'an unrecorded model'} `
+    + `into the claim below (${detail.claim_hash.slice(0, 12)}…). `
+    + 'The harness will settle exactly this claim, not your words.'));
+  const table = el('div', 'explain');
+  for (const row of detail.description ?? []) {
+    const r = el('div', 'explainrow');
+    r.appendChild(el('span', 'exlabel', row.label));
+    r.appendChild(el('span', 'exvalue mono', String(row.value)));
+    r.appendChild(el('span', 'exwhy', row.why));
+    table.appendChild(r);
+  }
+  inner.appendChild(table);
+  const actions = el('div', 'gateactions');
+  const yes = el('button', null, 'Yes, run this claim');
+  yes.onclick = () => {
+    box.remove();
+    runSession({ ...body, approve_claim_hash: detail.claim_hash });
+  };
+  const no = el('button', null, 'No, cancel');
+  no.onclick = () => { box.remove(); $('runMsg').textContent = 'cancelled: the claim was not approved'; };
+  actions.append(yes, no);
+  inner.appendChild(actions);
+  box.appendChild(inner);
+  $('cells').replaceChildren(box);
+  $('runMsg').textContent = 'approval needed before this claim runs';
+}
+
+// The formalizer broke rather than refused. Different thing, different fix:
+// a refusal means the conjecture is out of vocabulary, this means the model
+// could not produce the structured answer at all.
+function showFormalizeBreakage(detail) {
+  document.getElementById('claimGate')?.remove();
+  const box = el('section', 'cell claimgate');
+  box.id = 'claimGate';
+  box.appendChild(el('div', 'gut', 'Out:'));
+  const inner = el('div');
+  inner.appendChild(el('h3', null, 'The formalizer could not answer'));
+  inner.appendChild(el('div', 'caption mono', detail.reason ?? ''));
+  inner.appendChild(el('div', 'caption', detail.hint ?? ''));
+  box.appendChild(inner);
+  $('cells').replaceChildren(box);
+  $('runMsg').textContent = 'formalization failed — try another model in the picker';
+}
+
+function showFormalizeRefusal(detail) {
+  document.getElementById('claimGate')?.remove();
+  const box = el('section', 'cell claimgate');
+  box.id = 'claimGate';
+  box.appendChild(el('div', 'gut', 'Out:'));
+  const inner = el('div');
+  inner.appendChild(el('h3', null, 'This conjecture cannot be stated here'));
+  inner.appendChild(el('div', 'caption',
+    `${detail.formalizer || 'The formalizer'} refused rather than substitute a nearby claim: `
+    + `${detail.reason}. A nearby claim would be a different question, settled under your words.`));
+  box.appendChild(inner);
+  $('cells').replaceChildren(box);
+  $('runMsg').textContent = 'not formalizable with the current vocabulary';
 }
 
 function startAgent() {
@@ -681,6 +782,37 @@ function startAgent() {
   else if (problemId) body.problem_id = problemId;
   else { $('runMsg').textContent = 'pick a problem or type a conjecture'; return; }
   runSession(body);
+}
+
+// Pause holds the agent at a FINISHED step, which is the only state a human
+// can safely work on: the kernel is not mid-write and the next action has not
+// begun, so a move made now is the first thing the agent sees.
+async function togglePause() {
+  if (!nb.run || !nb.job) return;
+  const button = $('btnPause');
+  const resuming = nb.paused === true;
+  button.disabled = true;
+  try {
+    const result = await api(
+      `/api/agent/${encodeURIComponent(nb.run)}/${resuming ? 'resume' : 'pause'}`, {});
+    setPaused(result.paused === true);
+    setStatus(result.paused
+      ? 'paused at a finished step — move a point in the 3D view, or comment, then resume'
+      : 'resumed — the agent continues from the state you left');
+  } catch (e) {
+    $('runMsg').textContent = `${resuming ? 'resume' : 'pause'}: ${e.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setPaused(paused) {
+  nb.paused = paused;
+  const button = $('btnPause');
+  button.textContent = paused ? '▶ resume' : '⏸ pause';
+  button.title = paused
+    ? 'let the agent take its next step from the state you left'
+    : 'hold the agent at its next finished step so you can move the world yourself';
 }
 
 async function stopSession() {
@@ -751,10 +883,13 @@ async function init() {
   }
   const models = await api('/api/agent/models').catch(() => []);
   const modelSel = $('modelSel');
-  for (const model of models.filter((candidate) => candidate.vision)) {
+  // Every authenticated model, not only the ones that can see: SimAgent is
+  // numbers-first, so a text-only model can drive a whole run. Vision is
+  // marked because it only matters for an images run.
+  for (const model of models) {
     const option = document.createElement('option');
     option.value = JSON.stringify({ provider: model.provider, id: model.id });
-    option.textContent = `${model.provider}/${model.id}`;
+    option.textContent = `${model.provider}/${model.id}${model.vision ? '' : '  (text only)'}`;
     modelSel.appendChild(option);
   }
   await refreshRuns().catch(() => {});
@@ -783,6 +918,7 @@ async function init() {
 }
 
 $('btnRun').onclick = () => startAgent();
+$('btnPause').onclick = () => togglePause();
 $('btnStop').onclick = () => stopSession();
 $('btnRestart').onclick = () => restartSession();
 $('btnRefresh').onclick = () => refreshRuns().catch(() => {});
@@ -835,10 +971,24 @@ function ensureOverlay() {
       -((event.clientY - rect.top) / rect.height) * 2 + 1,
     );
     raycaster.setFromCamera(pointer, camera);
-    const hit = raycaster.intersectObjects(group.children, true)
-      .find((intersection) => intersection.object.userData.commentTarget);
+    const crossed = raycaster.intersectObjects(group.children, true)
+      .filter((intersection) => intersection.object.userData.commentTarget);
+    // A soft indicator (the circumsphere, a face) surrounds the points, so the
+    // NEAREST thing under the pointer is almost always decoration and the
+    // vertices could never be picked at all. A dot bound to a variable is the
+    // only thing here that can be acted on, so it wins whenever the ray
+    // crosses one; everything else stays commentable.
+    const hit = crossed.find((intersection) =>
+      intersection.object.userData.commentTarget.var !== undefined) ?? crossed[0];
     if (!hit) return;
     const primitive = hit.object.userData.commentTarget;
+    // A bound dot can be MOVED, not only discussed. The move goes through the
+    // same journaled human-action boundary the model's own actions use, so the
+    // record says who did it.
+    if (primitive.var !== undefined) {
+      showMoveControls(primitive);
+      return;
+    }
     $('ovCap').textContent = `picked ${primitive.label ?? primitive.type} · add a comment or branch`;
     openComment({ step: ov.step.step, kind: 'scene', primitive });
   });
@@ -875,11 +1025,18 @@ const XYZ = (p) => [p[0], p[1], p[2] ?? 0];
 const V = (p) => new THREE.Vector3(...XYZ(p));
 
 function primitiveTarget(prim, extra = {}) {
-  return {
+  const target = {
     type: prim.type,
     label: prim.name ?? prim.text ?? prim.type,
     ...extra,
   };
+  // A dot that renders a free variable knows WHICH number it is, so picking it
+  // is enough to move it. Without this the pick can only be talked about.
+  if (prim.binds && typeof extra.index === 'number') {
+    target.var = prim.binds;
+    target.row = extra.index;
+  }
+  return target;
 }
 
 function buildOverlayScene(prims) {
@@ -1072,6 +1229,92 @@ function openProgression() {
   sizeOverlay();
   frameOverlay();
   ov.startLoop();
+}
+
+// ------------------------------------------------------- moving it yourself --
+// Picking a bound dot gives the human the same two world moves the model has:
+// place it exactly (set_var) or push it (nudge). Both go through the journaled
+// user-action boundary, so the trace says the human made this step, and the
+// model is told the move was not its own.
+function showMoveControls(primitive) {
+  const box = $('ovMove');
+  box.replaceChildren();
+  box.style.display = 'block';
+  const here = primitive.coords ?? [0, 0, 0];
+  box.appendChild(el('div', 'who',
+    `${primitive.var}[${primitive.row}] — your move, recorded as yours`));
+
+  const row = el('div', 'row');
+  const fields = here.map((value, axis) => {
+    const input = el('input');
+    input.type = 'number';
+    input.step = '0.05';
+    input.value = Number(value).toFixed(3);
+    input.title = ['x', 'y', 'z'][axis] ?? `coord ${axis}`;
+    row.appendChild(input);
+    return input;
+  });
+  const place = el('button', 'mini', 'place here');
+  place.onclick = () => humanMove('set_var', {
+    name: primitive.var, row: primitive.row,
+    values: fields.map((f) => Number(f.value)),
+  });
+  const push = el('button', 'mini', 'nudge +0.1 z');
+  push.onclick = () => humanMove('nudge', {
+    name: primitive.var, row: primitive.row,
+    delta: here.map((_, axis) => (axis === 2 ? 0.1 : 0)),
+  });
+  row.append(place, push);
+  box.appendChild(row);
+
+  // Drawing an auxiliary object is a move too, and it was the one the human
+  // could not make: the model could `construct`, the person could not. Same
+  // closed vocabulary, same journaled boundary.
+  const build = el('div', 'row');
+  const ctor = el('select');
+  for (const kind of ['midpoint', 'centroid', 'circumcenter', 'segment']) {
+    const option = el('option', null, kind);
+    option.value = kind;
+    ctor.appendChild(option);
+  }
+  const draw = el('button', 'mini', `construct on ${primitive.var}`);
+  draw.onclick = () => humanMove('construct', {
+    name: `${ctor.value}_${primitive.var}`.toLowerCase(),
+    ctor: ctor.value,
+    args: [primitive.var],
+  });
+  build.append(ctor, draw);
+  box.appendChild(build);
+  box.appendChild(el('div', '', '')).id = 'ovMoveMsg';
+  const say = el('div', 'caption', 'or comment on it instead');
+  const talk = el('button', 'mini', 'comment');
+  talk.onclick = () => { box.style.display = 'none'; openComment({ step: ov.step.step, kind: 'scene', primitive }); };
+  say.appendChild(talk);
+  box.appendChild(say);
+  $('ovCap').textContent = `picked ${primitive.var}[${primitive.row}]`;
+}
+
+async function humanMove(tool, args) {
+  const message = document.getElementById('ovMoveMsg');
+  if (!nb.run || !nb.job) {
+    if (message) message.textContent = 'no live session: moves need a running agent';
+    return;
+  }
+  if (message) message.textContent = 'sending…';
+  try {
+    const result = await api(`/api/agent/${encodeURIComponent(nb.run)}/action`,
+      { tool, args });
+    // The agent's answer to a human move is the next cell, so say where to
+    // look rather than leaving the click with no consequence on screen.
+    if (message) {
+      message.textContent = result.isError
+        ? `the kernel refused it: step ${result.traceStep}`
+        : `done — step ${result.traceStep} below is yours, and the agent has been told`;
+    }
+    pullTrace().catch(() => {});
+  } catch (e) {
+    if (message) message.textContent = `error: ${e.message}`;
+  }
 }
 
 // The last cell: the whole run as one picture. It appears when the run is

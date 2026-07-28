@@ -180,6 +180,11 @@ class AgentStartBody(BaseModel):
         "off", "minimal", "low", "medium", "high", "xhigh", "max"
     ] = "medium"
     max_turns: int = 40
+    # numbers-first default; true makes this run the image arm
+    images: bool = False
+    # the hash of the exact formalized claim the caller read and accepted;
+    # required before an agent runs on natural-language input
+    approve_claim_hash: str | None = None
 
 
 class AgentCommentBody(BaseModel):
@@ -196,6 +201,20 @@ class AgentBranchBody(BaseModel):
     step: int
     comment: str | None = None
     target: dict | None = None
+
+
+# Claims shown to a user and awaiting their yes. Keyed by the hash they were
+# shown, so approving returns the exact claim they read rather than whatever a
+# second formalizer call happens to produce. Bounded: a browser tab left open
+# must not grow the process without limit.
+_PENDING_CLAIM_LIMIT = 32
+_pending_claims: dict[str, object] = {}
+
+
+def _remember_claim(claim_hash: str, formalization) -> None:
+    _pending_claims[claim_hash] = formalization
+    while len(_pending_claims) > _PENDING_CLAIM_LIMIT:
+        _pending_claims.pop(next(iter(_pending_claims)))
 
 
 def create_app(
@@ -568,11 +587,14 @@ def create_app(
         conjecture = body.conjecture.strip() if body.conjecture else ""
         if bool(body.problem_id) == bool(conjecture):
             raise HTTPException(422, "give exactly one of problem_id or conjecture")
+        from .. import intake as intake_mod
+
         spec_path = None
         problem_id = body.problem_id
+        approved_intake = None
         if problem_id:
             try:
-                get(problem_id)
+                approved_intake = intake_mod.record(get(problem_id), problem_id, "bundled")
             except KeyError as exc:
                 # Not bundled: it may be one of the user's own files, which the
                 # runtime takes as a path rather than an id.
@@ -581,24 +603,109 @@ def create_app(
                     raise HTTPException(404, str(exc)) from exc
                 spec_path = on_disk[1].resolve()
                 problem_id = None
-        else:
-            from ..llm import formalize
+        if spec_path is not None and approved_intake is None:
+            approved_intake = intake_mod.record(
+                ProblemSpec.load(spec_path), str(spec_path), "spec-file")
+        if not problem_id and spec_path is None:
+            from ..llm import FormalizeError, FormalizeRefused, formalize_recorded
 
-            spec = formalize(conjecture)
+            # Approval names ONE claim by hash. Formalizing is a model call and
+            # is not deterministic, so re-running it on the approval request
+            # produces a different claim and the hash can never match: the gate
+            # would be unpassable. The claim the user read is kept here and
+            # loaded back by its own hash.
+            pending = _pending_claims.get(body.approve_claim_hash or "")
+            if pending is not None:
+                made = pending
+            else:
+                try:
+                    # The model YOU picked formalizes too. Without this the
+                    # formalizer silently used whatever pi listed first, which
+                    # here was a small model that returns no tool call at all.
+                    made = formalize_recorded(conjecture, provider=body.provider,
+                                              model=body.model)
+                except FormalizeRefused as refused:
+                # 422: the request is answerable, the conjecture is not. Saying
+                # so beats substituting a nearby claim the user never asked.
+                    raise HTTPException(422, {
+                        "error": "formalization_refused",
+                        "reason": refused.reason,
+                        "formalizer": refused.formalizer,
+                    }) from refused
+                except FormalizeError as broke:
+                    # A formalizer that breaks is not a server fault, and a bare
+                    # 500 tells the user nothing they can act on. Name what failed.
+                    raise HTTPException(502, {
+                        "error": "formalization_failed",
+                        "reason": str(broke),
+                        "hint": "pick a model in the picker: the default is whichever "
+                                "model pi lists first, which may not support the "
+                                "structured tool call the formalizer needs",
+                    }) from broke
+            spec = made.claim
+            record = intake_mod.record(spec, made.source_text, "conjecture",
+                                       formalizer=made.formalizer)
+            if body.approve_claim_hash:
+                try:
+                    record.approve(body.approve_claim_hash)
+                except ValueError as exc:
+                    raise HTTPException(409, str(exc)) from exc
+            if record.needs_approval:
+                # 428 Precondition Required: the caller must read this exact
+                # claim and send its hash back before an agent may run on it.
+                _remember_claim(record.claim_hash, made)
+                raise HTTPException(428, {
+                    "error": "claim_approval_required",
+                    "claim_hash": record.claim_hash,
+                    "formalizer": record.formalizer,
+                    "source_text": record.source_text,
+                    "description": record.description,
+                })
+            _pending_claims.pop(record.claim_hash, None)
             spec_dir = traces_root / ".formalized"
             spec_dir.mkdir(parents=True, exist_ok=True)
             spec_path = spec_dir / f"{spec.id}-{uuid.uuid4().hex[:8]}.json"
             spec.save(spec_path)
+            approved_intake = record
         try:
-            return control().start(
+            started = control().start(
                 problem_id=problem_id,
                 spec_path=spec_path,
                 provider=body.provider,
                 model=body.model,
                 thinking_level=body.thinking_level,
                 max_turns=max(1, min(body.max_turns, 200)),
+                images=body.images,
             )
         except Exception as exc:  # transport errors map to stable HTTP statuses
+            control_error(exc)
+        # The record lands in the run directory, so a trace read months later
+        # still names the original question and who translated it.
+        run_name = started.get("run") if isinstance(started, dict) else None
+        if run_name and approved_intake is not None:
+            try:
+                approved_intake.save(traces_root / str(run_name))
+            except OSError:
+                pass  # a run that started must not die over its own paperwork
+        return started
+
+    @app.post("/api/agent/{run}/pause")
+    def agent_pause(run: str) -> dict:
+        """Hold the model at its next settled step so the human can work.
+
+        Running tools finish first, so the kernel is never caught mid-write;
+        what stops is the model taking a new action.
+        """
+        try:
+            return control().pause(run)
+        except Exception as exc:
+            control_error(exc)
+
+    @app.post("/api/agent/{run}/resume")
+    def agent_resume(run: str) -> dict:
+        try:
+            return control().resume(run)
+        except Exception as exc:
             control_error(exc)
 
     @app.post("/api/agent/{run}/stop")
