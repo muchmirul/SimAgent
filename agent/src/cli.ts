@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
@@ -55,21 +56,27 @@ async function authCheck(argv: string[]): Promise<number> {
   return result.configured ? 0 : 2;
 }
 
-async function runSession(argv: string[]): Promise<number> {
-  const options = parseOptions(argv);
+/**
+ * Command line -> runtime options, with no model and no side effects.
+ *
+ * Exported so a test can check that every flag actually ARRIVES. A flag that
+ * is parsed but never assigned looks exactly like a fresh default from the
+ * outside, and no test that starts from `createSimAgentRuntime` can see the
+ * difference.
+ */
+export function runtimeOptionsFrom(options: Map<string, string>): CreateSimAgentRuntimeOptions {
   const problemId = options.get("problem-id");
   const specPath = options.get("spec");
   if ((problemId === undefined) === (specPath === undefined)) {
     throw new Error("provide exactly one of --problem-id or --spec");
   }
-  const outDir = resolve(required(options, "out-dir"));
   const provider = options.get("provider");
   const modelId = options.get("model");
   if ((provider === undefined) !== (modelId === undefined)) {
     throw new Error("--provider and --model must be given together");
   }
   const runtimeOptions: CreateSimAgentRuntimeOptions = {
-    outDir,
+    outDir: resolve(required(options, "out-dir")),
     thinkingLevel: (options.get("thinking") ?? "medium") as NonNullable<CreateSimAgentRuntimeOptions["thinkingLevel"]>,
     singleToolPerTurn: true,
     // numbers-first by default; `--images true` turns the picture channel on
@@ -78,6 +85,18 @@ async function runSession(argv: string[]): Promise<number> {
   };
   if (problemId !== undefined) runtimeOptions.problemId = problemId;
   if (specPath !== undefined) runtimeOptions.specPath = resolve(specPath);
+  // continue an earlier run directory instead of starting from a fresh world
+  const adopt = options.get("adopt");
+  if (adopt !== undefined) runtimeOptions.adopt = resolve(adopt);
+  return runtimeOptions;
+}
+
+async function runSession(argv: string[]): Promise<number> {
+  const options = parseOptions(argv);
+  const runtimeOptions = runtimeOptionsFrom(options);
+  const outDir = runtimeOptions.outDir;
+  const provider = options.get("provider");
+  const modelId = options.get("model");
   if (provider !== undefined && modelId !== undefined) {
     const selected = await resolveStandardModel(provider, modelId);
     if (!selected.auth) throw new Error(`no Pi authentication found for ${provider}`);
@@ -174,17 +193,21 @@ async function main(): Promise<number> {
   process.stderr.write(
     "usage:\n" +
       "  cli.js auth-check --provider NAME --model ID\n" +
-      "  cli.js run (--problem-id ID | --spec PATH) --out-dir PATH [--provider NAME --model ID] [--images true] [--seed N]\n" +
+      "  cli.js run (--problem-id ID | --spec PATH) --out-dir PATH [--provider NAME --model ID] [--images true] [--seed N] [--adopt RUN_DIR]\n" +
       "  cli.js smoke --provider NAME --model ID [--problem-id ID] [--out-dir PATH]\n",
   );
   return 2;
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  });
+// Only when this file IS the command. A test that imports it to check the flag
+// surface must not run the command, print usage, and set an exit code.
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
+}

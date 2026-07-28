@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from . import answer as answer_mod
+from . import rounds as rounds_mod
 from .library import all_specs, get
 from .pipeline import run_problem
 from .spec import ProblemSpec
@@ -222,13 +223,11 @@ def _cmd_agent(args) -> int:
     node = os.environ.get("SIMAGENT_PI_NODE") or shutil.which("node")
     if not node:
         raise SystemExit("Node.js >=22.19 is required for pi agent mode")
-    command = [
+    base_command = [
         node,
         str(pi_cli),
         "run",
         *source_args,
-        "--out-dir",
-        str(out),
         "--thinking",
         args.thinking,
         "--max-turns",
@@ -248,7 +247,7 @@ def _cmd_agent(args) -> int:
     if args.provider or args.model:
         if not (args.provider and args.model):
             raise SystemExit("--provider and --model must be given together")
-        command.extend(["--provider", args.provider, "--model", args.model])
+        base_command.extend(["--provider", args.provider, "--model", args.model])
     else:
         print(
             "no --provider/--model given: pi routes the first authenticated "
@@ -256,12 +255,71 @@ def _cmd_agent(args) -> int:
             + "model it has. SimAgent harnesses whichever one that is; "
             "the run records it in runtime.json and agent_summary.md."
         )
-    code = subprocess.run(command, cwd=repo_root, check=False).returncode
-    who = out / "runtime.json"
+
+    # One round is one run of the model against its turn budget. More than one
+    # makes the budget a pause instead of an ending: each later round adopts the
+    # previous one, so the world and the journal carry over. Both stopping
+    # rules are mechanical — a kernel stamp, or the budget the caller declared.
+    # `or 1` would be wrong here: it turns an explicit 0 into 1, which is the
+    # bug this check exists to prevent.
+    requested = getattr(args, "rounds", 1)
+    rounds = 1 if requested is None else int(requested)
+    if rounds < 1:
+        # Silently rounding up to 1 would spend a model run the caller asked
+        # not to have.
+        raise SystemExit(f"--rounds must be at least 1, got {rounds}")
+    adopt_next = getattr(args, "adopt", None)
+    records: list[dict] = []
+    stopped = ""
+    for index in range(1, rounds + 1):
+        round_out = rounds_mod.round_dir(out, index, rounds)
+        if rounds > 1:
+            # Each round is a run in its own right, so it carries the same
+            # contract: answer.md there must still name the user's question and
+            # whether the translation was approved.
+            round_out.mkdir(parents=True, exist_ok=True)
+            intake.save(round_out)
+        command = [*base_command, "--out-dir", str(round_out)]
+        if adopt_next:
+            command.extend(["--adopt", str(adopt_next)])
+            print(
+                f"\n== round {index} of {rounds}: continuing {adopt_next} ==\n"
+                "  (its acts replay into this world first, which takes as long "
+                "as they did to run)",
+                flush=True,
+            )
+        elif rounds > 1:
+            print(f"\n== round {index} of {rounds} ==", flush=True)
+        code = subprocess.run(command, cwd=repo_root, check=False).returncode
+        record = rounds_mod.read_round(index, round_out, code)
+        records.append(record)
+        stopped = rounds_mod.stop_reason(record)
+        if stopped:
+            break
+        adopt_next = str(round_out)
+    else:
+        stopped = rounds_mod.budget_spent(rounds)
+
+    last = Path(records[-1]["dir"])
+    who = last / "runtime.json"
     if who.is_file():
         info = json.loads(who.read_text())
         print(f"Model: {info.get('provider')}/{info.get('model')}")
-    return code
+    if rounds > 1:
+        (out / "loop.json").write_text(
+            json.dumps({"format": "loop/1", "rounds": records, "stopped": stopped},
+                       indent=2)
+        )
+        for record in records:
+            print(f"  round {record['round']}: {record['turns']} turns, "
+                  f"ended {record['ended_by'] or 'unrecorded'}, "
+                  f"verified_by {record['verified_by']}")
+        print(f"Loop ended after {len(records)} round(s): {stopped}.")
+        print(f"Record: {out / 'loop.json'}")
+    handoff = last / "handoff.md"
+    if handoff.is_file():
+        print(f"Handoff: {handoff}")
+    return records[-1]["exit_code"]
 
 
 def _loopback_sockets(port: int) -> list:
@@ -403,6 +461,20 @@ def main(argv=None) -> int:
         metavar="HASH",
         help="approve the formalized claim with this exact hash (required before an "
              "agent runs on --conjecture input; the hash is printed by a first run)",
+    )
+    a.add_argument(
+        "--adopt",
+        metavar="RUN_DIR",
+        help="continue an earlier run: its journal is replayed into this world "
+             "and hash-checked, then re-opened so the work carries on",
+    )
+    a.add_argument(
+        "--rounds",
+        type=int,
+        default=1,
+        help="run this many rounds, each adopting the one before it (default 1). "
+             "Rounds land in <out>/round-N and stop early the moment the kernel "
+             "stamps a result",
     )
     a.add_argument("--out", help="output directory (default runs/agent-<id>)")
     a.set_defaults(fn=_cmd_agent)

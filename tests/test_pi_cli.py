@@ -1,4 +1,6 @@
 """P6 CLI cutover: `simagent agent` launches the TypeScript pi runtime."""
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from simagent.cli import _cmd_agent
@@ -254,3 +256,212 @@ def test_approving_on_the_cli_does_not_re_formalize(tmp_path, monkeypatch):
     assert _cmd_agent(second) == 0
     assert len(calls) == 1, "approval re-ran the formalizer and got a different claim"
     assert Intake.load(tmp_path / "run").approved
+
+
+def _fake_pi(monkeypatch, tmp_path, outcomes):
+    """Stand in for the node runtime: record the command, write the metrics
+    the real kernel would have written, and report the exit code."""
+    import json as json_mod
+
+    calls: list[list[str]] = []
+    cli = tmp_path / "cli.js"
+    cli.write_text("")
+    monkeypatch.setenv("SIMAGENT_PI_CLI", str(cli))
+    monkeypatch.setenv("SIMAGENT_PI_NODE", "/nonexistent/node")
+
+    class Finished:
+        def __init__(self, code):
+            self.returncode = code
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        out = Path(command[command.index("--out-dir") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        verified_by, ended_by, code = outcomes[len(calls) - 1]
+        (out / "metrics.json").write_text(json_mod.dumps(
+            {"format": "metrics/1", "verified_by": verified_by,
+             "ended_by": ended_by, "turns": 12}))
+        return Finished(code)
+
+    monkeypatch.setattr("simagent.cli.subprocess.run", fake_run)
+    return calls
+
+
+def test_a_single_round_still_runs_in_the_directory_it_was_given(tmp_path, monkeypatch):
+    """The default is one round, and it must look exactly like it always did."""
+    calls = _fake_pi(monkeypatch, tmp_path, [("none", "stop", 0)])
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle")
+
+    assert _cmd_agent(args) == 0
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--out-dir") + 1] == str(Path(args.out).resolve())
+    assert "--adopt" not in calls[0]
+    assert not (Path(args.out) / "loop.json").exists()
+
+
+def test_each_round_adopts_the_one_before_it(tmp_path, monkeypatch):
+    """A turn budget becomes a pause: round 2 continues round 1's world."""
+    calls = _fake_pi(monkeypatch, tmp_path,
+                     [("none", "stop", 0), ("none", "stop", 0), ("none", "stop", 0)])
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=3)
+
+    assert _cmd_agent(args) == 0
+    assert len(calls) == 3
+    assert "--adopt" not in calls[0]
+    for index in (1, 2):
+        adopted = calls[index][calls[index].index("--adopt") + 1]
+        assert adopted.endswith(f"round-{index}")
+        assert calls[index][calls[index].index("--out-dir") + 1].endswith(
+            f"round-{index + 1}")
+
+    record = json.loads((Path(args.out) / "loop.json").read_text())
+    assert record["stopped"] == "the declared budget of 3 round(s) ran out"
+    assert [r["round"] for r in record["rounds"]] == [1, 2, 3]
+
+
+def test_the_loop_stops_the_moment_the_kernel_stamps_one(tmp_path, monkeypatch):
+    """The stopping rule is mechanical: a stamp exists, or the budget is spent.
+    Nothing here reads the model's opinion of whether it is done."""
+    calls = _fake_pi(monkeypatch, tmp_path,
+                     [("none", "stop", 0), ("sandbox", "finish", 0), ("none", "stop", 0)])
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=3)
+
+    assert _cmd_agent(args) == 0
+    assert len(calls) == 2, "round 3 must never start once round 2 is stamped"
+    record = json.loads((Path(args.out) / "loop.json").read_text())
+    assert record["stopped"] == "the kernel stamped sandbox"
+
+
+def test_a_broken_runtime_is_not_retried_by_the_loop(tmp_path, monkeypatch):
+    calls = _fake_pi(monkeypatch, tmp_path, [("none", "", 2), ("none", "stop", 0)])
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=2)
+
+    assert _cmd_agent(args) == 2
+    assert len(calls) == 1
+    record = json.loads((Path(args.out) / "loop.json").read_text())
+    assert record["stopped"] == "the runtime exited 2"
+
+
+def test_a_round_that_wrote_no_metrics_is_not_treated_as_settled(tmp_path, monkeypatch):
+    """A crash before finalize leaves no metrics.json. A missing file must read
+    as 'nothing was established', never as a stamp — and the loop must not keep
+    paying a model to replay a history that produced nothing."""
+    cli = tmp_path / "cli.js"
+    cli.write_text("")
+    monkeypatch.setenv("SIMAGENT_PI_CLI", str(cli))
+    monkeypatch.setenv("SIMAGENT_PI_NODE", "/nonexistent/node")
+
+    class Finished:
+        returncode = 0
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr("simagent.cli.subprocess.run",
+                        lambda command, **kw: (calls.append(list(command)), Finished())[1])
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=4)
+
+    assert _cmd_agent(args) == 0
+    assert len(calls) == 1, "a round with no acts must not buy three more"
+    record = json.loads((Path(args.out) / "loop.json").read_text())
+    assert all(r["verified_by"] == "none" for r in record["rounds"])
+    assert record["stopped"] == "round 1 recorded no acts of its own"
+
+
+def test_an_unreadable_metrics_file_does_not_kill_the_loop(tmp_path, monkeypatch):
+    """Losing loop.json to a JSON error would throw away the record of every
+    round that already ran, including the money they cost."""
+    cli = tmp_path / "cli.js"
+    cli.write_text("")
+    monkeypatch.setenv("SIMAGENT_PI_CLI", str(cli))
+    monkeypatch.setenv("SIMAGENT_PI_NODE", "/nonexistent/node")
+
+    class Finished:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        out = Path(command[command.index("--out-dir") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "metrics.json").write_text("{not json at all")
+        return Finished()
+
+    monkeypatch.setattr("simagent.cli.subprocess.run", fake_run)
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=2)
+
+    assert _cmd_agent(args) == 0
+    record = json.loads((Path(args.out) / "loop.json").read_text())
+    assert record["rounds"][0]["verified_by"] == "none"
+    assert record["rounds"][0]["ended_by"] == "unreadable metrics.json"
+
+
+def test_a_failed_round_is_never_credited_with_a_stale_stamp(tmp_path, monkeypatch):
+    """A child that dies at startup leaves whatever an earlier invocation of
+    the same --out wrote. Reading it would report a stamp this round did not
+    earn, and would end the loop on a lie."""
+    cli = tmp_path / "cli.js"
+    cli.write_text("")
+    monkeypatch.setenv("SIMAGENT_PI_CLI", str(cli))
+    monkeypatch.setenv("SIMAGENT_PI_NODE", "/nonexistent/node")
+
+    stale = Path(_agent_args(tmp_path).out) / "round-1"
+    stale.mkdir(parents=True)
+    (stale / "metrics.json").write_text(json.dumps(
+        {"verified_by": "sandbox+lean", "ended_by": "finish", "turns": 30}))
+
+    class Died:
+        returncode = 3
+
+    monkeypatch.setattr("simagent.cli.subprocess.run", lambda command, **kw: Died())
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=2)
+
+    assert _cmd_agent(args) == 3
+    record = json.loads((Path(args.out) / "loop.json").read_text())
+    assert record["rounds"][0]["verified_by"] == "none"
+    assert record["stopped"] == "the runtime exited 3"
+
+
+def test_rounds_below_one_is_refused_rather_than_rounded_up(tmp_path, monkeypatch):
+    """Rounding 0 up to 1 spends a model run the caller asked not to have."""
+    import pytest
+
+    calls = _fake_pi(monkeypatch, tmp_path, [("none", "stop", 0)])
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle", rounds=0)
+
+    with pytest.raises(SystemExit, match="--rounds must be at least 1"):
+        _cmd_agent(args)
+    assert calls == []
+
+
+def test_adopt_reaches_the_runtime_on_a_single_round(tmp_path, monkeypatch):
+    """The plain `--adopt` case has no loop around it, so nothing else would
+    catch the flag being dropped between argparse and the node command."""
+    calls = _fake_pi(monkeypatch, tmp_path, [("none", "stop", 0)])
+    prior = tmp_path / "earlier-run"
+    prior.mkdir()
+    args = _agent_args(tmp_path, problem="circumcenter-in-triangle",
+                       adopt=str(prior))
+
+    assert _cmd_agent(args) == 0
+    assert calls[0][calls[0].index("--adopt") + 1] == str(prior)
+    assert calls[0][calls[0].index("--out-dir") + 1] == str(Path(args.out).resolve())
+
+
+def test_the_agent_parser_really_has_adopt_and_rounds():
+    """_cmd_agent reads args.adopt and args.rounds. If the parser never
+    produced them, every test above would still pass on its SimpleNamespace
+    while the real command line silently ignored both flags."""
+    from simagent.cli import main
+
+    import pytest
+
+    parsed = {}
+
+    def capture(args):
+        parsed.update(vars(args))
+        return 0
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("simagent.cli._cmd_agent", capture)
+        main(["agent", "circumcenter-in-triangle", "--adopt", "runs/prior",
+              "--rounds", "4"])
+
+    assert parsed["adopt"] == "runs/prior"
+    assert parsed["rounds"] == 4

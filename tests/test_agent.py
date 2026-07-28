@@ -288,3 +288,109 @@ def test_recall_reports_the_past_without_steering_the_future(tmp_path):
     for phrase in advice:
         assert phrase not in description
     assert "no next move" in description or "names no next move" in description
+
+
+def test_a_run_that_never_finishes_still_hands_off(tmp_path):
+    """The turn budget is the most common ending and the least documented one.
+
+    `finish` is the only ending that writes a summary, so a run killed by its
+    budget used to leave an empty narrative and a journal nobody reads. The
+    handoff is written on every ending instead, from kernel records.
+    """
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
+    run.dispatch("plan", {"method": "counterexample", "idea": "flatten it"})
+    run.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    # no finish, no stop: the run simply ran out of turns
+    _, _, artifacts = run.finalize()
+
+    handoff = Path(artifacts["handoff"]).read_text()
+    assert "without `finish`" in handoff
+    assert "-12.000" in handoff, "the margin it stopped on must be in the handoff"
+    assert "(-1.000, +0.000)" in handoff, "and the exact coordinates too"
+    assert "flatten it" in handoff, "including what it declared it was doing"
+
+
+def test_a_stopped_run_says_why_it_was_stopped(tmp_path):
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
+    run.dispatch("check", {})
+    run.summary = "maximum turn count reached (40)"
+    run.stop()
+    _, _, artifacts = run.finalize()
+
+    handoff = Path(artifacts["handoff"]).read_text()
+    assert "maximum turn count reached (40)" in handoff
+
+
+def test_the_handoff_records_the_instrument_that_refused(tmp_path):
+    """A dead end with no reason is one the next run pays for again."""
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
+    run.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    run.dispatch("certify", {})
+    run.dispatch("sum_of_squares", {})
+    _, _, artifacts = run.finalize()
+
+    handoff = Path(artifacts["handoff"]).read_text()
+    assert "Where an instrument refused" in handoff
+    assert "`sum_of_squares`" in handoff
+    assert "settle that before trying to prove it" in handoff, "the reason, verbatim"
+
+
+def test_the_handoff_restates_the_stamp_and_never_raises_it(tmp_path):
+    """explain.py's rule holds here too: a run that established nothing must
+    say so in words, because a quiet handoff reads as a finished one."""
+    run = AgentRun(get("positive-quadratic"), tmp_path)
+    run.dispatch("check", {})
+    proof, _, artifacts = run.finalize()
+
+    handoff = Path(artifacts["handoff"]).read_text()
+    assert proof is None or proof.verified_by == "none"
+    assert "No kernel-grade result was established" in handoff
+    assert "as open as it was before this run" in handoff
+
+
+def test_metrics_count_the_run_without_reading_any_prose(tmp_path):
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
+    run.dispatch("plan", {"method": "counterexample", "idea": "flatten it"})
+    run.dispatch("expect", {"relation": "<", "value": 0.0})
+    run.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    run.dispatch("nudge", {"name": "T", "row": 9, "delta": [0, 0]})  # out of range
+    run.dispatch("finish", {"summary": "the circumcenter left the triangle"})
+    _, _, artifacts = run.finalize()
+
+    metrics = json.loads(Path(artifacts["metrics"]).read_text())
+    assert metrics["ended_by"] == "finish"
+    assert metrics["tool_errors"] == 1
+    assert metrics["turns"] == 5 and metrics["tool_calls"] == 5
+    assert metrics["by_tool"]["set_var"] == 1
+    assert metrics["predictions"] == {"scored": 1, "correct": 1, "open": 0}
+    assert metrics["verified_by"] == "none", "no certify ran, so nothing is stamped"
+    assert "the circumcenter left the triangle" not in json.dumps(metrics)
+
+
+def test_metrics_count_the_same_rows_the_journal_finally_holds(tmp_path):
+    """A closing narrative is a journal row. Counting before it is written
+    reports one step fewer than trace.jsonl holds, and every eval number built
+    on that count is quietly off by one."""
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
+    run.dispatch("check", {})
+    run.note_thought("one last thought with no act after it")
+    _, _, artifacts = run.finalize()
+
+    metrics = json.loads(Path(artifacts["metrics"]).read_text())
+    rows = [s for s in read_trace(tmp_path)["steps"]]
+    assert metrics["turns"] == len(rows) == 2
+
+
+def test_the_handoff_carries_predictions_that_never_resolved(tmp_path):
+    """An expectation with no committed state after it is left open. It is the
+    question the run was in the middle of asking, so it belongs in the handoff
+    rather than dying with the turn budget."""
+    run = AgentRun(get("circumcenter-in-triangle"), tmp_path)
+    run.dispatch("set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.2]})
+    run.dispatch("expect", {"relation": "<", "value": -50.0, "note": "flatter still"})
+    _, _, artifacts = run.finalize()
+
+    handoff = Path(artifacts["handoff"]).read_text()
+    assert "prediction #1 is still open: margin < -50.0" in handoff
+    metrics = json.loads(Path(artifacts["metrics"]).read_text())
+    assert metrics["predictions"] == {"scored": 0, "correct": 0, "open": 1}

@@ -94,6 +94,8 @@ SIMAGENT_LEAN=off .venv/bin/python -m pytest -q   # the no-toolchain path users 
 .venv/bin/simagent play <id>                  # interactive REPL; preview.png re-renders per command
 .venv/bin/simagent web                        # reasoning notebook on :8642 (problem in, visual reasoning cells out)
 .venv/bin/simagent agent <id> [--images]      # also accepts --spec FILE or --conjecture "..."
+.venv/bin/simagent agent <id> --adopt runs/PRIOR   # continue a run that ran out of turns
+.venv/bin/simagent agent <id> --rounds 3      # each round adopts the last; stops on a kernel stamp
 ```
 
 `.github/workflows/ci.yml` runs those four on every push and pull request, in
@@ -226,14 +228,21 @@ Each module is described once, here. State it nowhere else.
   tasks, seeds and budget (`search` = no model, the floor; `text` = the
   numbers-first loop; `images` = the same loop with pictures), and only
   mechanical outcomes scored (certified solve rate, `verified_by`, turns, tool
-  errors, human interventions). The required improvement is declared IN the
+  errors, human interventions, and how each run ENDED — an arm whose runs all
+  die on the turn budget is saying the budget binds, not that the harness
+  failed). Those counts are read from each run's own `metrics.json` rather than
+  recounted here. The required improvement is declared IN the
   manifest before anything runs, a seed whose first sample already settles the
   claim is screened out and the skip is recorded, and `format_report` states
   the gap without ever naming a winner. `separation()` also reports tasks the
   floor already solves, because a task search settles says nothing about the
   loop. Arms differ by ONE flag: same task, seed, budget and model, and the
   `--seed` reaches `SandboxSession` so two seeds are two different starting
-  worlds rather than the same run twice.
+  worlds rather than the same run twice. A manifest `budget.rounds` above 1
+  makes each model arm a LOOP of adopted runs on the same rules `rounds.py`
+  gives the CLI, and the report prints the rounds spent, because an arm that
+  needed three rounds to reach another's rate bought it with model calls.
+  Default 1, so every result recorded before this still means what it says.
   FIRST LIVE RESULT (2026-07-28, `runs/eval-live/eval.json`,
   openai-codex/gpt-5.6-sol, 3 seeds on `circumcenter-near-centroid`): search
   0/3 certified, text 3/3 (median 9 turns), images 3/3 (median 11). Both beat
@@ -267,14 +276,36 @@ Each module is described once, here. State it nowhere else.
    margin number it already had.
 - `explain.py` turns kernel state into plain English: `result_rows()` and
   `result_summary()` for the end of a run, `step_line()` for one state of a
-  progression. Reads Proof/SearchReport objects or the JSON they were saved
-  as, so `answer.md` and the notebook say the same thing. Never mints or
-  upgrades a verdict.
+  progression, `handoff_markdown()` for what one run leaves the next. Reads
+  Proof/SearchReport objects or the JSON they were saved as, so `answer.md` and
+  the notebook say the same thing. The handoff is built from
+  `AgentRun.journal_digest()`, the same builder `recall` uses, so the run's
+  memory and its handoff cannot drift into two accounts of one journal. Never
+  mints or upgrades a verdict: a run that established nothing says in words
+  that the claim is exactly as open as it was before.
 - `answer.py` writes answer.md / answer.tex / conjecture.lean. Verdict wording
   is deliberate: certified vs numeric-candidate vs evidence. Never upgrade the
   claim.
 - `cli.py` is the command surface listed above; `play.py` is the interactive
-  sandbox that re-renders `preview.png` after every command.
+  sandbox that re-renders `preview.png` after every command. `agent --rounds N`
+  is the LOOP: round k runs into `<out>/round-k` and adopts round k-1, so a
+  turn budget becomes a pause rather than the end of the work. `--rounds 0` is
+  refused rather than rounded up to one, since rounding up spends a model run
+  the caller asked not to have. `loop.json` records every round and why the
+  loop stopped. Rounds get slower as they go: adopting replays every earlier
+  act for real, which is the price of the exact hash-checked reproduction that
+  makes it trustworthy.
+- `rounds.py` holds the loop's stopping rules, once, because two callers apply
+  them: `simagent agent --rounds N` and the evaluation arms that measure
+  whether rounds help. Two copies would drift, and the eval would then be
+  scoring a loop nobody runs. All three rules are mechanical and none reads the
+  model's opinion of being done: a `verified_by` other than `none` in that
+  round's `metrics.json`, a round that recorded no act of its own (the next one
+  would only replay the same history at the same price), or the round budget
+  the caller declared. Everything fails toward "nothing established": no
+  metrics file, an unreadable one, or a non-zero exit credits no stamp, and
+  metrics are ignored entirely when the runtime exited non-zero, because the
+  file may be a previous invocation's.
 - `visualize/` — `mpl.py` (always-on PNG), `manim_gen.py` (generates a
   self-contained ThreeDScene). Manim runs from a repo-local conda-forge env
   `.manim-env/` (micromamba, no sudo — pip manim is impossible here: no cairo
@@ -289,7 +320,24 @@ Each module is described once, here. State it nowhere else.
   WRITE their render (the notebook and trace need it) and attach it to the
   model's content only when `images` is on, so `system_prompt(images)` must
   describe the senses that run actually has.
-- `kernel_transport.py` is the provider-free, strict JSONL kernel boundary.
+- `kernel_transport.py` is the provider-free, strict JSONL kernel boundary. It
+  also owns ADOPT (`--adopt RUN_DIR`, journal version 4): a later run replays a
+  finished run's whole journal, hash-checked like any branch, and then writes an
+  `adopt` event that re-opens the world. The re-opening is the point — replay
+  alone restores the ENDING too, so the next model would be refused at its first
+  act with "session already finished". The boundary is a journalled, replayable
+  event rather than quiet setup, because it changes kernel state; the earlier
+  ending is kept in the record and cleared from the state, so no run can finish
+  under a summary it never wrote. The header records the SEED, because the seed
+  is the starting world and cannot be recovered from the state: adopting takes
+  the earlier run's seed rather than asking a caller who has a directory to
+  remember a number. Version 3 journals still replay (nothing about the hashed
+  state changed) and one started from a non-default seed fails saying exactly
+  that. `_adoption_note` tells the model where the inherited steps end and how
+  the earlier run stopped, since a model told nothing would read those steps as
+  its own; it says what was ESTABLISHED is still held by the kernel, because
+  the deductive proof state is part of the replayed state and claiming
+  otherwise would be false.
 - `agent/` is the TypeScript pi runtime, with
   `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` exact-pinned
   at 0.82.0. Pi owns provider auth, model turns, events, steering, and
@@ -314,7 +362,21 @@ Each module is described once, here. State it nowhere else.
   where its own points are, and every deliberate move becomes a guess read off
   a PNG.
 - Every run writes `trace.jsonl` (thought, action, scene, equation, diff
-  cells) and `kernel-journal.jsonl` (replayable calls and state hashes).
+  cells) and `kernel-journal.jsonl` (replayable calls and state hashes), plus,
+  at EVERY ending, `handoff.md` (what this run leaves the next one) and
+  `metrics.json` (its own mechanical counts). Both matter most in the ending
+  that used to write nothing: `finish` is the only ending that produces a
+  summary, so a run killed by its turn budget left an empty narrative and a
+  journal nobody could read. `AgentRun.ending()` names which of the three
+  endings happened, `refusals()` lists every instrument that ran and
+  established nothing WITH the instrument's own reason, and `evaluate.py` reads
+  `metrics.json` instead of recounting the journal, because two counters over
+  one journal are two numbers that can disagree. Metrics count THIS run's own
+  acts: an adopted run replays the earlier run's acts into its own journal, so
+  counting them all would credit a round with work nobody did in it, and the
+  loop's no-progress rule reads exactly that number. `Journal.flush_pending()`
+  runs before the count so a closing narrative is not one row the journal has
+  and the metrics do not.
   Comments enter pi with `session.steer()` and are journaled as
   `user_comment`; the annotation must preserve the full kernel state hash.
   `pause()`/`resume()` hold the model at its NEXT tool call, which is a settled
@@ -366,6 +428,13 @@ Each module is described once, here. State it nowhere else.
   and `proof.sos_proof` take a `notes` list and append the REASON at each
   refusal (tight/equality case, Gram matrix not PSD, odd degree, wrong
   verdict), because a dead end with no reason is one the model cannot act on.
+  The same reason must survive the run: `AgentRun.refusals()` carries it into
+  `handoff.md`, or the next run pays for the same dead end again.
+- Continuing a run must never invent state. Adopt replays and hash-checks; it
+  does not restore a snapshot. A stopping rule for a loop must be mechanical (a
+  kernel stamp, or a budget declared before the run), never the model's own
+  sense that it is finished, and a missing artifact must read as "nothing was
+  established" rather than as a stamp.
 - New formalization vocabulary means a registry entry for a measure,
   constraint, constructor, certifier, Lean hook, or scene. Give it an accurate
   `doc` string, because `llm.py` generates the model's menu from those docs.
@@ -380,8 +449,12 @@ Each module is described once, here. State it nowhere else.
 
 ## Roadmap
 
-P7 multi-agent lanes, adopt, and merge remain unbuilt. The pi service permits
-one active controlled run at a time.
+Adopt landed (2026-07-28): `--adopt` continues a finished run, `--rounds` loops
+it until a kernel stamp or a declared budget stops it, and every run now leaves
+`handoff.md` plus `metrics.json`. P7 multi-agent lanes and merge remain
+unbuilt, and the notebook cannot yet start an adopted run: adopt is CLI-only
+until the UI change is built and checked in a real browser. The pi service
+permits one active controlled run at a time.
 
 
 # Claude Instructions

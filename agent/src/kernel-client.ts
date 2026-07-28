@@ -83,6 +83,12 @@ export interface KernelClientOptions {
   replayJournal?: string;
   replayThrough?: number;
   /**
+   * Continue an earlier run: its whole journal is replayed into this world and
+   * hash-checked, then the world is re-opened so work can carry on. A run that
+   * ran out of turns is otherwise unreachable by the next one.
+   */
+  adopt?: string;
+  /**
    * Send rendered pictures to the model as well as numbers. Default false:
    * the model's senses are text and coordinates, and renders still land on
    * disk for the notebook. The eval arms flip this on the same kernel.
@@ -162,6 +168,7 @@ export class KernelClient {
     if (options.replayThrough !== undefined) {
       args.push("--replay-through", String(options.replayThrough));
     }
+    if (options.adopt !== undefined) args.push("--adopt", resolve(options.adopt));
     if (options.images === true) args.push("--images");
     if (options.seed !== undefined) args.push("--seed", String(options.seed));
 

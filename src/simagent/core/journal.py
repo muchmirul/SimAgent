@@ -249,19 +249,30 @@ class Journal:
         self._fh.flush()
         return entry
 
+    def flush_pending(self) -> None:
+        """Write the trailing narrative row, if the model spoke after its last act.
+
+        Callable before the end of a run: anything that COUNTS the journal has
+        to see the same rows the file will finally hold, or the count is one
+        short of the record it claims to describe.
+        """
+        if self._fh.closed or not self._pending:
+            return
+        self.steps += 1
+        self._fh.write(
+            json.dumps(
+                {"step": self.steps, "ts": time.time(), "thought": self._pending,
+                 "tool": None, "args": None, "error": False}
+            )
+            + "\n"
+        )
+        self._pending = []
+        self._fh.flush()
+
     def close(self) -> None:
         if self._fh.closed:
             return
-        if self._pending:  # trailing narrative with no act after it
-            self.steps += 1
-            self._fh.write(
-                json.dumps(
-                    {"step": self.steps, "ts": time.time(), "thought": self._pending,
-                     "tool": None, "args": None, "error": False}
-                )
-                + "\n"
-            )
-            self._pending = []
+        self.flush_pending()
         self._fh.write(json.dumps({"event": "end", "steps": self.steps}) + "\n")
         self._fh.close()
 

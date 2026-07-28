@@ -7,6 +7,7 @@ threshold is read from the manifest rather than from the results, and that
 nothing here reads model prose.
 """
 import json
+from pathlib import Path
 
 import pytest
 
@@ -195,3 +196,107 @@ def test_eval_cli_defaults_to_the_offline_arm(tmp_path, capsys):
     assert _cmd_eval(args) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["format"] == evaluate.MANIFEST_VERSION
+
+
+def test_an_arm_reads_the_run_s_own_metrics_rather_than_recounting(tmp_path):
+    """Every run now counts its own turns as it ends. Two counters over one
+    journal are two numbers that can disagree, so the arm reads the run's."""
+    out_dir = tmp_path / "run"
+    out_dir.mkdir()
+    (out_dir / "metrics.json").write_text(json.dumps({
+        "format": "metrics/1", "turns": 9, "tool_errors": 2,
+        "human_interventions": 1, "ended_by": "stop", "verified_by": "sandbox",
+    }))
+    (out_dir / "trace.jsonl").write_text(
+        json.dumps({"step": 1, "tool": "look", "error": False}) + "\n")
+
+    result = evaluate.run_model_arm(
+        tmp_path / "spec.json", "t", "text", 1, out_dir=out_dir,
+        budget={"max_turns": 5}, provider=None, model=None, repo_root=tmp_path,
+        launcher=lambda command, repo_root: 0)
+
+    assert result.turns == 9, "the run's own count, not the one-line trace"
+    assert result.tool_errors == 2 and result.human_interventions == 1
+    assert result.ended_by == "stop"
+
+
+def test_scoring_reports_how_the_runs_of_an_arm_ended():
+    """An arm whose runs all die on the turn budget is telling you the budget
+    binds, not that the harness failed."""
+    rows = [
+        evaluate.ArmResult(task="t", arm="text", seed=1, ended_by="stop"),
+        evaluate.ArmResult(task="t", arm="text", seed=2, ended_by="finish"),
+    ]
+    per_arm = evaluate.score(rows)
+    assert per_arm["text"]["ended_by"] == {"stop": 1, "finish": 1}
+
+
+def test_a_single_round_arm_runs_exactly_as_it_always_did(tmp_path):
+    """Every result recorded so far was a one-round arm. If rounds changed the
+    command or the directory, the live result on file would stop meaning what
+    it says."""
+    commands = []
+    out_dir = tmp_path / "run"
+    result = evaluate.run_model_arm(
+        tmp_path / "spec.json", "t", "text", 1, out_dir=out_dir,
+        budget={"max_turns": 5, "thinking": "low"}, provider=None, model=None,
+        repo_root=tmp_path,
+        launcher=lambda command, repo_root: (commands.append(command), 0)[1])
+
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("--out-dir") + 1] == str(out_dir)
+    assert "--adopt" not in commands[0]
+    assert result.rounds_used == 1
+
+
+def test_a_rounds_budget_makes_each_round_adopt_the_last(tmp_path):
+    """This is what makes the loop measurable: same task, same seed, same
+    model, and the only difference is whether stopped runs get continued."""
+    commands = []
+
+    def launcher(command, repo_root):
+        commands.append(command)
+        out = Path(command[command.index("--out-dir") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "metrics.json").write_text(json.dumps(
+            {"verified_by": "none", "ended_by": "stop", "turns": 11}))
+        return 0
+
+    result = evaluate.run_model_arm(
+        tmp_path / "spec.json", "t", "text", 1, out_dir=tmp_path / "run",
+        budget={"max_turns": 5, "rounds": 3}, provider=None, model=None,
+        repo_root=tmp_path, launcher=launcher)
+
+    assert len(commands) == 3 and result.rounds_used == 3
+    assert commands[1][commands[1].index("--adopt") + 1].endswith("round-1")
+    assert commands[2][commands[2].index("--adopt") + 1].endswith("round-2")
+    assert result.ended_by == "stop", "read from the LAST round, not the first"
+
+
+def test_a_rounds_arm_stops_on_the_same_rule_the_cli_uses(tmp_path):
+    """One rule, one place. If eval kept running after a stamp it would be
+    scoring a loop that `simagent agent` does not run."""
+    commands = []
+
+    def launcher(command, repo_root):
+        commands.append(command)
+        out = Path(command[command.index("--out-dir") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        settled = len(commands) == 2
+        (out / "metrics.json").write_text(json.dumps(
+            {"verified_by": "sandbox" if settled else "none",
+             "ended_by": "finish" if settled else "stop", "turns": 11}))
+        if settled:
+            (out / "proof.json").write_text(json.dumps(
+                {"verified_by": "sandbox", "method": "counterexample",
+                 "claim": "DISPROVED"}))
+        return 0
+
+    result = evaluate.run_model_arm(
+        tmp_path / "spec.json", "t", "text", 1, out_dir=tmp_path / "run",
+        budget={"max_turns": 5, "rounds": 4}, provider=None, model=None,
+        repo_root=tmp_path, launcher=launcher)
+
+    assert len(commands) == 2, "round 3 must never be paid for"
+    assert result.rounds_used == 2
+    assert result.certified is True and result.verified_by == "sandbox"

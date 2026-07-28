@@ -269,6 +269,50 @@ writes `trace.jsonl`, the reasoning trace the notebook replays. Manim stills and
 videos render via `simagent solve --render-manim` (see README for the no-sudo
 Manim env).
 
+## 7b. When a run runs out of turns
+
+A run stops at `--max-turns` whether or not the problem is settled, and that is
+the usual ending on a hard claim. Two things now happen instead of the work
+being lost.
+
+Every run writes `handoff.md`: the configuration it stopped on with exact
+coordinates, the margins it actually saw, what it declared it was doing, which
+predictions it got wrong, and every instrument that refused with the reason the
+instrument gave. It is written from kernel records, so a run that established
+nothing says so plainly rather than reading like a finished one. Alongside it,
+`metrics.json` counts the run: turns, tool errors, human moves, how it ended.
+
+To carry on from there, adopt it:
+
+```bash
+.venv/bin/simagent agent circumcenter-in-triangle --adopt runs/agent-triangle
+```
+
+The new run replays the old run's whole journal into a fresh world, checks
+every state hash on the way, then re-opens it so the model can act again. The
+world, the constructions and the journal are all there, `recall` reads the
+inherited steps as well as the new ones, and the model is told which steps were
+not its own. Replay re-runs every earlier act for real, so adopting a long run
+takes about as long as that run took.
+
+To do that automatically, ask for rounds:
+
+```bash
+.venv/bin/simagent agent circumcenter-in-triangle --rounds 3 --max-turns 40
+```
+
+Round 1 lands in `runs/agent-.../round-1`, round 2 adopts round 1, and so on.
+The loop stops early the moment the kernel stamps a result, or when a round
+takes no act of its own, or when the rounds you declared run out. It never
+stops because the model says it is done. `loop.json` records each round and
+which rule ended it.
+
+To find out whether rounds actually help, put `"rounds": 3` in an eval
+manifest's budget and run the arms. The report then prints the certified rate
+next to the rounds each arm spent, so "the loop helps" is a number you can
+read rather than an impression. That costs real model calls, so it needs your
+`--provider` and `--model`.
+
 ## 8. Reading the verdicts honestly
 
 - **CERTIFIED counterexample**: proved false. Done.

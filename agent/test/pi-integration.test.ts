@@ -52,6 +52,8 @@ async function harness(
     input?: ("text" | "image")[];
     singleToolPerTurn?: boolean;
     images?: boolean;
+    /** Continue an earlier run directory instead of a fresh world. */
+    adopt?: string;
   } = {},
 ): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "simagent-p0-"));
@@ -79,6 +81,7 @@ async function harness(
     model,
     singleToolPerTurn: options.singleToolPerTurn,
     images: options.images,
+    ...(options.adopt === undefined ? {} : { adopt: options.adopt }),
   });
   return { root, runtime, faux, modelRuntime };
 }
@@ -667,6 +670,36 @@ describe.sequential("Pi 0.82.0 SimAgent integration", () => {
     expect(runtime.description.systemPrompt).not.toContain("Images are ON");
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("continues an earlier run when the runtime is told to adopt it", async () => {
+    // The flag has to survive three hops (cli -> runtime -> kernel argv). A
+    // flag that silently does not arrive looks exactly like a fresh world, so
+    // the assertion is on kernel state, not on the option object.
+    const first = await harness([fauxAssistantMessage(fauxText("done"))]);
+    await first.runtime.kernel.callTool("seed-the-world", "set_var", {
+      name: "T",
+      values: [-1, 0, 1, 0, 0, 0.2],
+    });
+    const before = await first.runtime.kernel.snapshot();
+    await first.runtime.dispose();
+
+    const second = await harness([fauxAssistantMessage(fauxText("done"))], {
+      adopt: join(first.root, "kernel"),
+    });
+    try {
+      const after = await second.runtime.kernel.snapshot();
+      expect(after.state).toEqual(before.state);
+      expect(after.finished).toBe(false);
+      expect(second.runtime.description.taskPrompt).toContain("continues an earlier one");
+      const records = await journal(second.runtime);
+      expect(records.some((entry) => entry.event === "adopt")).toBe(true);
+      const acted = await second.runtime.kernel.callTool("after-adopt", "check", {});
+      expect(acted.isError).toBe(false);
+    } finally {
+      await cleanup(second);
+      await rm(first.root, { recursive: true, force: true });
+    }
   });
 
   it("performs no network calls in the deterministic faux-provider suite", () => {

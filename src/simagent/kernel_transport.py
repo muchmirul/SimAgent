@@ -40,7 +40,12 @@ from .library import get as get_bundled
 from .spec import ProblemSpec
 
 JOURNAL_FILE = "kernel-journal.jsonl"
-JOURNAL_VERSION = 3  # 3 adds user_action events and actor attribution
+JOURNAL_VERSION = 4  # 4 adds adopt events: a finished world re-opened for a later run
+# Older journals whose events this build can still reproduce exactly. Version 3
+# only lacks the adopt event, and nothing about the hashed state changed with
+# 4, so a v3 journal replays byte-identically; refusing it would strand every
+# run recorded before this build for no gain in safety.
+REPLAYABLE_JOURNAL_VERSIONS = frozenset({3, 4})
 
 _ANNOTATION_KINDS = frozenset({"user_comment", "provenance"})
 # World moves a human may make mid-run. Deliberately excludes every instrument
@@ -211,14 +216,62 @@ def _read_records(path: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]
     return records[0], [
         r
         for r in records[1:]
-        if r.get("event") in {"call", "user_action", "note", "annotation", "stop"}
+        if r.get("event") in {"call", "user_action", "note", "annotation", "stop", "adopt"}
     ]
+
+
+def _journal_of(target: str | Path) -> Path:
+    """Accept a run DIRECTORY or the journal inside it.
+
+    A person adopting an earlier run has its directory, not the file name in
+    it, and guessing wrong should fail here with the path rather than later
+    with a replay error that says nothing about what was missing.
+    """
+    path = Path(target)
+    if path.is_dir():
+        path = path / JOURNAL_FILE
+    if not path.is_file():
+        raise FileNotFoundError(f"no kernel journal to adopt at {path}")
+    return path.resolve()
 
 
 def read_journal(path: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Compatibility reader returning only model tool calls."""
     header, records = _read_records(path)
     return header, [record for record in records if record.get("event") == "call"]
+
+
+_ENDED_PHRASE = {
+    "finish": "the earlier model called `finish`",
+    "stop": "the earlier run was stopped before it called `finish` (a turn "
+            "budget usually does this)",
+    "open": "the earlier run simply stopped acting",
+}
+
+
+def _adoption_note(adopted: list[dict[str, Any]]) -> str:
+    """Tell the model the world it woke up in is not a fresh one.
+
+    Facts only: where the inherited steps end and how the earlier run stopped.
+    What to do about any of it is the model's call, exactly as before.
+    """
+    if not adopted:
+        return ""
+    last = adopted[-1]
+    through = last["throughStep"]
+    whose = (
+        f"steps 1-{through} are its acts, not yours, and " if through
+        else "its record is already in your journal, and "
+    )
+    return (
+        "\n\nThis run continues an earlier one. Every act of that run was "
+        "replayed into this world, so the configuration, the constructions and "
+        f"anything it established are already here: {whose}`recall` restates "
+        "them alongside your own. It ended because "
+        f"{_ENDED_PHRASE.get(last['endedBy'], _ENDED_PHRASE['open'])}. "
+        "What it established the kernel still holds; what it merely said is "
+        "not here at all."
+    )
 
 
 class KernelTransport:
@@ -231,11 +284,25 @@ class KernelTransport:
         *,
         replay_journal: str | Path | None = None,
         replay_through: int | None = None,
+        adopt: str | Path | None = None,
         images: bool = False,
         seed: int = 0,
     ):
         if replay_journal is None and replay_through is not None:
             raise ValueError("replay_through requires replay_journal")
+        if adopt is not None and replay_journal is not None:
+            raise ValueError(
+                "adopt and replay_journal both load a prefix; give exactly one"
+            )
+        adopted = _journal_of(adopt) if adopt is not None else None
+        if adopted is not None:
+            # The seed IS the starting world, so a run adopted with a different
+            # one cannot reproduce the journal's first state at all. Take the
+            # earlier run's seed rather than making the caller remember it: the
+            # caller has a directory, not the number it was started with.
+            header, _ = _read_records(adopted)
+            if "seed" in header:
+                seed = int(header["seed"])
         self.out = Path(out_dir)
         journal_path = self.out / JOURNAL_FILE
         if journal_path.exists():
@@ -250,6 +317,9 @@ class KernelTransport:
                 "event": "header",
                 "version": JOURNAL_VERSION,
                 "specId": spec.id,
+                # Recorded so a later run can adopt this one: the seed decides
+                # the starting world, and it cannot be recovered from the state.
+                "seed": self.run.seed,
                 "state": _state(self.run),
                 "stateHash": _state_hash(_state(self.run)),
                 "provenance": (
@@ -258,13 +328,20 @@ class KernelTransport:
                         "through": replay_through,
                     }
                     if replay_journal is not None
+                    else {"journal": str(adopted), "through": None, "mode": "adopt"}
+                    if adopted is not None
                     else None
                 ),
             }
         )
-        if replay_journal is not None:
+        if replay_journal is not None or adopted is not None:
             try:
-                self._replay(replay_journal, replay_through)
+                if adopted is not None:
+                    # The whole earlier run, then the boundary that re-opens it.
+                    self._replay(adopted, None)
+                    self.adopt(str(adopted))
+                else:
+                    self._replay(replay_journal, replay_through)
             except Exception:
                 # A rejected prefix is a normal fail-closed path. Do not leave
                 # the partially replayed transport's three owned files open.
@@ -285,7 +362,9 @@ class KernelTransport:
             "specId": self.run.spec.id,
             "title": self.run.spec.title,
             "systemPrompt": system_prompt(self.run.images),
-            "taskPrompt": _task_prompt(self.run.spec),
+            # An adopted world is not the world the task prompt describes, and a
+            # model told nothing would read the inherited steps as its own.
+            "taskPrompt": _task_prompt(self.run.spec) + _adoption_note(self.run.adopted),
             "tools": TOOLS,
             "journalPath": str(self.path.resolve()),
             # which sensory channel this run gave the model, so a trace can be
@@ -488,11 +567,67 @@ class KernelTransport:
         )
         return self.snapshot()
 
+    def adopt(self, source: str) -> dict[str, Any]:
+        """Re-open a replayed world so a later run can carry on inside it.
+
+        Replay brings the earlier world back exactly, and that includes its
+        ending: a run that called `finish`, or that its turn budget stopped,
+        comes back finished, and the next model would be refused at its first
+        act. This is the boundary that re-opens it. It is a journalled event
+        rather than quiet setup because it changes kernel state, and every
+        state change here is replayable and hash-checked like any other.
+
+        The earlier ending is kept in the record and cleared from the state, so
+        the new run cannot finish under a summary it never wrote.
+        """
+        if self._closed:
+            raise RuntimeError("kernel transport is finalized")
+        prior = {
+            "by": (
+                "stop" if self.run.stop_requested
+                else "finish" if self.run.finished
+                else "open"
+            ),
+            "summary": self.run.summary,
+        }
+        through_step = self.run.trace.steps
+        self.run.finished = False
+        self.run.stop_requested = False
+        self.run.summary = ""
+        inherited = {"run": source, "endedBy": prior["by"], "throughStep": through_step}
+        # The notebook reads trace.jsonl, so without a row here the human sees
+        # one continuous run and no sign of where the inherited part ends.
+        entry = self.run.trace.annotate(
+            "provenance",
+            {"text": f"adopted the run at {source}; steps 1-{through_step} came from it",
+             "adopted": dict(inherited)},
+        )
+        # Two different numbers on purpose: `throughStep` is the last inherited
+        # ACT, which is what the model is told; `boundaryStep` is this
+        # bookkeeping row, and counting it as a turn would credit the new run
+        # with an act nobody took.
+        self.run.adopted.append({**inherited, "boundaryStep": entry["step"]})
+        self.journal_seq += 1
+        state = _state(self.run)
+        digest = _state_hash(state)
+        self._write(
+            {
+                "event": "adopt",
+                "seq": self.journal_seq,
+                "source": source,
+                "priorEnding": prior,
+                "state": state,
+                "stateHash": digest,
+            }
+        )
+        return {"stateHash": digest, "isError": False}
+
     def _replay(self, source: str | Path, through: int | None) -> None:
         header, records = _read_records(source)
-        if header.get("version") != JOURNAL_VERSION:
+        if header.get("version") not in REPLAYABLE_JOURNAL_VERSIONS:
             raise KernelReplayError(
-                f"unsupported journal version {header.get('version')!r}; expected {JOURNAL_VERSION}"
+                f"unsupported journal version {header.get('version')!r}; "
+                f"this build replays {sorted(REPLAYABLE_JOURNAL_VERSIONS)}"
             )
         if header.get("specId") != self.run.spec.id:
             raise KernelReplayError(
@@ -500,7 +635,18 @@ class KernelTransport:
             )
         initial = self.snapshot()["stateHash"]
         if initial != header.get("stateHash"):
-            raise KernelReplayError("initial kernel state does not match journal header")
+            # Name the one cause the caller can act on. A journal written
+            # before seeds were recorded cannot say which world it started in,
+            # so no seed the caller supplies can be checked against it.
+            unseeded = (
+                " (this journal records no seed, so its starting world cannot "
+                "be reproduced from one)"
+                if "seed" not in header
+                else ""
+            )
+            raise KernelReplayError(
+                "initial kernel state does not match journal header" + unseeded
+            )
 
         max_seq = max((int(entry.get("seq", 0)) for entry in records), default=0)
         limit = max_seq if through is None else through
@@ -540,6 +686,10 @@ class KernelTransport:
                 )
             elif event == "stop":
                 result = self.stop(str(entry.get("summary") or ""))
+            elif event == "adopt":
+                # Reproduced from the record, not from the source file: a run
+                # whose ancestor directory moved must still replay exactly.
+                result = self.adopt(str(entry.get("source") or ""))
             else:  # pragma: no cover - _read_records filters this closed vocabulary
                 raise KernelReplayError(f"unsupported journal event {event!r}")
             if result["stateHash"] != entry.get("stateHash"):
@@ -644,6 +794,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--replay-journal")
     parser.add_argument("--replay-through", type=int)
+    parser.add_argument(
+        "--adopt",
+        metavar="RUN_DIR",
+        help="continue an earlier run: replay its whole journal into this world "
+             "(hash-checked), then re-open it so work can carry on",
+    )
     parser.add_argument("--seed", type=int, default=0,
                         help="seed for the starting configuration (default 0)")
     parser.add_argument(
@@ -664,6 +820,7 @@ def main(argv: list[str] | None = None) -> int:
             args.out_dir,
             replay_journal=args.replay_journal,
             replay_through=args.replay_through,
+            adopt=args.adopt,
             images=args.images,
             seed=args.seed,
         )

@@ -60,7 +60,11 @@ DEFAULT_MANIFEST = {
             "harness is not earning its cost"
         ),
     },
-    "budget": {"max_turns": 40, "thinking": "medium", "search_trials": 2000},
+    # rounds 1 is one run against one turn budget, which is what every result
+    # recorded so far measured. Raise it in a manifest to measure whether
+    # continuing a stopped run through `--adopt` settles more claims.
+    "budget": {"max_turns": 40, "thinking": "medium", "search_trials": 2000,
+               "rounds": 1},
 }
 
 
@@ -83,6 +87,13 @@ class ArmResult:
     verified_by: str = "none"
     certified: bool = False
     branch_improved: bool = False
+    # How the run stopped: "finish", "stop" (a turn budget usually), or "open".
+    # A run that ran out of turns and one that decided it was done are two
+    # different outcomes, and averaging them hides which one an arm produces.
+    ended_by: str = ""
+    # How many adopted rounds this arm actually spent. 1 unless the manifest
+    # declared a round budget; fewer than declared means a stopping rule fired.
+    rounds_used: int = 0
     error: str = ""
     out_dir: str = ""
 
@@ -167,6 +178,17 @@ def _read_run_outcome(out_dir: Path, result: ArmResult) -> None:
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
         result.provider = runtime.get("provider", "")
         result.model = runtime.get("model", "")
+    # Every run now counts its own turns and errors as it ends, so read them
+    # rather than count them twice: two counters over one journal are two
+    # numbers that can disagree.
+    metrics_path = out_dir / "metrics.json"
+    if metrics_path.is_file():
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        result.turns = metrics.get("turns", 0)
+        result.tool_errors = metrics.get("tool_errors", 0)
+        result.human_interventions = metrics.get("human_interventions", 0)
+        result.ended_by = metrics.get("ended_by", "")
+        return
     trace_path = out_dir / "trace.jsonl"
     if trace_path.is_file():
         steps = 0
@@ -191,9 +213,16 @@ def run_model_arm(spec_path: Path, task_id: str, arm: str, seed: int, *,
                   launcher=None) -> ArmResult:
     """One agent run through the pi runtime, with the image channel on or off.
 
+    With `rounds` above 1 in the budget it is a LOOP of runs instead: each
+    round adopts the one before it, so the turn budget becomes a pause. The
+    stopping rules come from `rounds.py`, the same ones `simagent agent` uses,
+    because an evaluation of a loop nobody runs measures nothing.
+
     `launcher` exists so the wiring can be tested offline; the default really
     starts the runtime.
     """
+    from . import rounds as rounds_mod
+
     result = ArmResult(
         task=task_id, arm=arm, seed=seed,
         thinking=budget.get("thinking", "medium"),
@@ -201,26 +230,42 @@ def run_model_arm(spec_path: Path, task_id: str, arm: str, seed: int, *,
         provider=provider or "", model=model or "",
         out_dir=str(out_dir),
     )
-    command = [
+    rounds = max(1, int(budget.get("rounds", 1)))
+    base = [
         "run",
         "--spec", str(spec_path),
-        "--out-dir", str(out_dir),
         "--thinking", result.thinking,
         "--max-turns", str(result.max_turns),
         "--images", "true" if arm == "images" else "false",
         "--seed", str(seed),
     ]
     if provider and model:
-        command += ["--provider", provider, "--model", model]
+        base += ["--provider", provider, "--model", model]
+
     started = time.monotonic()
-    try:
-        code = (launcher or _launch_pi)(command, repo_root)
+    adopt_next: str | None = None
+    last_dir = out_dir
+    for index in range(1, rounds + 1):
+        round_out = rounds_mod.round_dir(out_dir, index, rounds)
+        last_dir = round_out
+        command = [*base, "--out-dir", str(round_out)]
+        if adopt_next:
+            command += ["--adopt", adopt_next]
+        try:
+            code = (launcher or _launch_pi)(command, repo_root)
+        except Exception as exc:  # noqa: BLE001 - a broken arm is data, not a crash
+            result.error = f"{type(exc).__name__}: {exc}"
+            break
+        result.rounds_used = index
         if code != 0:
             result.error = f"runtime exited {code}"
-    except Exception as exc:  # noqa: BLE001 - a broken arm is data, not a crash
-        result.error = f"{type(exc).__name__}: {exc}"
+        if rounds_mod.stop_reason(rounds_mod.read_round(index, round_out, code)):
+            break
+        adopt_next = str(round_out)
     result.elapsed_s = round(time.monotonic() - started, 3)
-    _read_run_outcome(out_dir, result)
+    # The last round holds the artifacts: earlier rounds are the history it
+    # replayed, and scoring them would count one claim several times.
+    _read_run_outcome(last_dir, result)
     return result
 
 
@@ -258,6 +303,13 @@ def score(results: list[ArmResult]) -> dict:
             "tool_errors": sum(r.tool_errors for r in rows),
             "human_interventions": sum(r.human_interventions for r in rows),
             "branch_improved": sum(1 for r in rows if r.branch_improved),
+            # An arm whose runs mostly end on the turn budget is telling you the
+            # budget is the binding constraint, not the harness. Shown in
+            # format_report, because a number nobody reads changes no decision.
+            "ended_by": _counts(r.ended_by or "unrecorded" for r in rows),
+            # What the loop cost. An arm that needed three rounds to certify
+            # what another certified in one bought its rate with model calls.
+            "rounds_used": sum(r.rounds_used for r in rows),
             "errored": sum(1 for r in rows if r.error),
         }
     return per_arm
@@ -377,6 +429,22 @@ def format_report(report: dict) -> str:
         lines.append(f"{arm:8} {row['runs']:5d} {row['certified']:10d} "
                      f"{row['certified_solve_rate']:7.2f} "
                      f"{str(row['median_turns'] or '-'):>13} {row['errored']:7d}")
+    endings = {arm: row.get("ended_by") for arm, row in report["per_arm"].items()
+               if row.get("ended_by")}
+    if endings:
+        # A run stopped by its turn budget did not decide anything; it ran out
+        # of room. Averaging it with a run that finished hides which happened.
+        lines += ["", "how the runs of each arm ended:"]
+        lines += [f"  {arm}: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+                  for arm, counts in endings.items()]
+    looped = {arm: row["rounds_used"] for arm, row in report["per_arm"].items()
+              if row.get("rounds_used", 0) > row["runs"]}
+    if looped:
+        # What the rate cost. An arm that needed three rounds per task to reach
+        # the same rate as a one-round arm bought it with model calls.
+        lines += ["", "rounds spent (more than one run per task means adopting ran):"]
+        lines += [f"  {arm}: {spent} rounds over {report['per_arm'][arm]['runs']} tasks"
+                  for arm, spent in looped.items()]
     separating = [row for row in report.get("separation", []) if not row["separates"]]
     if separating:
         lines += ["", "tasks that cannot tell the arms apart:"]

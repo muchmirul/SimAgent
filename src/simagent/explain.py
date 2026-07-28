@@ -7,9 +7,14 @@ a number without its meaning is not compressed, only shortened.
 
 So every result and every state carries an explanation built HERE, from kernel
 state only: `proof.json`, the search report, and the per-step check the sandbox
-recorded. Nothing in this module reads model prose, and nothing in it decides
-anything. `proof.py` remains the only module that stamps `verified_by`; this
-one restates that stamp in words and can never raise it.
+recorded. Nothing in this module decides anything. `proof.py` remains the only
+module that stamps `verified_by`; this one restates that stamp in words and can
+never raise it.
+
+One exception, stated so nobody has to discover it: `handoff_markdown` quotes
+the strings the model itself supplied to `plan` and `expect`, because what a
+run *declared it was doing* is part of the record the next run needs. They are
+quoted as declarations, never as findings, and no branch here reads them.
 """
 from __future__ import annotations
 
@@ -161,6 +166,149 @@ def result_summary(proof, report) -> str:
         "Nothing reached a kernel-grade result. Whatever was said above is narrative, "
         "and the harness does not grade narrative."
     )
+
+
+ENDED_WORDS = {
+    "finish": "The model called `finish`, so it decided the run was over.",
+    "stop": "The run was stopped before the model called `finish`",
+    "open": "The run ended without `finish` and without a stop, so nothing "
+            "marked it complete.",
+}
+
+
+def _config_lines(config: dict | None) -> list[str]:
+    """The exact coordinates the run stopped on, plus what the margin says."""
+    lines: list[str] = []
+    for name, value in ((config or {}).get("vars") or {}).items():
+        rows = value if isinstance(value, (list, tuple)) else [value]
+        if rows and isinstance(rows[0], (list, tuple)):
+            lines.append(f"- `{name}` = " + "; ".join(_point(r) for r in rows))
+        else:
+            lines.append(f"- `{name}` = {_point(rows)}")
+    check = (config or {}).get("check") or {}
+    for name, value in (check.get("data") or {}).items():
+        lines.append(f"- derived `{name}` = {_point(value)}")
+    if check.get("error"):
+        lines.append(f"- the configuration is degenerate here: {check['error']}")
+    margin = check.get("margin")
+    if margin is not None:
+        state = "HOLDS" if float(margin) > 0 else "FAILS"
+        lines.append(
+            f"- margin = {_num(margin)}, so the property {state} at this configuration"
+        )
+    return lines or ["- the run recorded no configuration"]
+
+
+def handoff_markdown(spec, proof, report, digest, *, config, ending,
+                     provenance: str = "", refusals=()) -> str:
+    """What one run leaves for whoever picks the claim up next.
+
+    A run that hits its turn budget stops mid-thought: the model never writes a
+    summary, and everything the kernel recorded sits in a journal that the next
+    run cannot read. This restates that journal in English so work can continue
+    from what was found rather than from nothing. Like everything else here it
+    only RESTATES: it cannot stamp a verdict, and it never names a next move.
+    """
+    ending = ending or {}
+    how = ENDED_WORDS.get(ending.get("by", "open"), ENDED_WORDS["open"])
+    if ending.get("by") == "stop":
+        how = f"{how}: {ending.get('note') or 'no reason recorded'}."
+
+    out: list[str] = [
+        f"# Handoff — {getattr(spec, 'title', '') or getattr(spec, 'id', 'run')}",
+        "",
+        "State this run reached, written from kernel records only. Nothing here "
+        "is a verdict and nothing here says what to do next.",
+        "",
+    ]
+    if provenance:
+        out += [provenance, ""]
+    for earlier in digest.get("continues") or []:
+        # Without this the reader counts inherited steps as this run's work.
+        out += [
+            f"Continues `{earlier['run']}`: steps 1-{earlier['throughStep']} "
+            f"below are that run's acts, replayed here exactly.",
+            "",
+        ]
+    out += ["## How this run ended", "", how, ""]
+
+    out += ["## What was established", "", result_summary(proof, report), ""]
+    for row in digest.get("established") or []:
+        out.append(f"- **{row['label']}**: {row['value']} — {row['why']}")
+    out.append("")
+
+    out += ["## Where the configuration stands", "", *_config_lines(config), ""]
+
+    seen = digest.get("margin_seen")
+    if seen:
+        low, high = seen["lowest"], seen["highest"]
+        out += [
+            "## The margins this run actually saw",
+            "",
+            f"- lowest {_num(low['margin'])} at step {low['step']} (`{low['tool']}`)",
+            f"- highest {_num(high['margin'])} at step {high['step']} (`{high['tool']}`)",
+            "",
+        ]
+
+    plans = digest.get("approaches_declared") or []
+    built = digest.get("constructed") or []
+    predictions = digest.get("predictions") or {}
+    scored = predictions.get("scored") or []
+    still_open = predictions.get("still_open") or []
+    tried: list[str] = []
+    for plan in plans:
+        tried.append(f"- declared `{plan['method']}`: {plan['idea']}")
+    for entity in built:
+        tried.append(f"- constructed `{entity['name']}` = {entity['ctor']}({', '.join(entity['args'])})")
+    if scored:
+        right = sum(1 for s in scored if s.get("ok"))
+        tried.append(f"- {len(scored)} prediction(s) scored, {right} right")
+        for s in scored:
+            if not s.get("ok"):
+                tried.append(
+                    f"  - wrong: expected margin {s['relation']} {s['value']}, "
+                    f"got {s['actual']}"
+                )
+    for s in still_open:
+        tried.append(
+            f"- prediction #{s['id']} is still open: margin {s['relation']} {s['value']}"
+        )
+    if tried:
+        out += ["## What this run tried", "", *tried, ""]
+
+    if refusals:
+        out += [
+            "## Where an instrument refused",
+            "",
+            "Each line is the instrument's own report of its limit, copied as it "
+            "was recorded.",
+            "",
+        ]
+        for refusal in refusals:
+            out.append(f"- step {refusal['step']} `{refusal['tool']}`: {refusal['why']}")
+        out.append("")
+
+    out += [
+        "## What is still open",
+        "",
+        f"{digest.get('steps_taken', 0)} step(s) are on record in `trace.jsonl`, "
+        "and `kernel-journal.jsonl` replays every one of them exactly.",
+        "",
+    ]
+    stamp = _get(proof, "verified_by") or "none"
+    if stamp == "none":
+        out.append(
+            "No kernel-grade result was established, so the claim is exactly as "
+            "open as it was before this run."
+        )
+    else:
+        import os as _os_probe
+        with open("/tmp/claude-1000/-mnt-Tforce-dev-SimAgent/b5b7447d-9a4c-4118-b355-d44a9d3528e3/scratchpad/BRANCH_HIT.txt", "a") as _fh:
+            _fh.write(f"HIT stamp={stamp} pid={_os_probe.getpid()} test={_os_probe.environ.get('PYTEST_CURRENT_TEST','?')}\n")
+        out.append(
+            f"A `{stamp}` result is on record; {STAMP_WORDS.get(stamp, 'see ARCHITECTURE.md')}."
+        )
+    return "\n".join(out) + "\n"
 
 
 def step_line(current: dict, previous: dict | None) -> str:

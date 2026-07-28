@@ -467,6 +467,10 @@ class AgentRun:
         # which model pi routed to this run; SimAgent harnesses any of them, so
         # the run has to say which one produced it
         self.runtime_info: dict = {}
+        # Which earlier runs this one continues, oldest first. Provenance about
+        # the run, like runtime_info: deliberately NOT part of the hashed kernel
+        # state, because where a world came from cannot change what it is.
+        self.adopted: list[dict] = []
         self._transcript = (self.out / "transcript.jsonl").open("w")
         # The mind trace: thought + act + scene + equation per step, replayable
         # in the web UI's Mind panel (narrative only — proof.json stays boss).
@@ -901,14 +905,12 @@ class AgentRun:
         ]
         return resolved
 
-    def _t_recall(self):
-        """Hand back what the kernel already recorded about this run.
+    def journal_digest(self) -> dict:
+        """Everything the kernel recorded about this run, as data.
 
-        A long session pushes its own early steps out of the model's context,
-        and the journal is write-only from the model's side, so without this
-        everything the harness carefully recorded is unreachable by the one who
-        needs it. Like `explain.py`, this RESTATES journaled state: it cannot
-        raise a stamp and it never names a next move.
+        One builder serves both `recall` (the model's memory during the run)
+        and the handoff written at the end, so the two can never drift into
+        saying different things about the same journal.
         """
         from . import explain
         from .core.journal import read_trace
@@ -921,7 +923,11 @@ class AgentRun:
         ]
         margins = [a for a in acts if a["margin"] is not None]
         world = self.session.world
-        digest = {
+        return {
+            # An adopted run replays the earlier run's acts into its own
+            # journal, so the acts below include steps this model never took.
+            # Saying so is a fact about the record, not a hint about the maths.
+            "continues": self.adopted or None,
             "established": explain.result_rows(
                 self.spec, self.deductive, self.best_report(), self.session._check()
             ),
@@ -947,12 +953,147 @@ class AgentRun:
             "note": "restated from this run's journal; nothing here is a verdict "
                     "and nothing here suggests a next move",
         }
-        return _fit(digest, MAX_RECALL_CHARS)
+
+    def _t_recall(self):
+        """Hand back what the kernel already recorded about this run.
+
+        A long session pushes its own early steps out of the model's context,
+        and the journal is write-only from the model's side, so without this
+        everything the harness carefully recorded is unreachable by the one who
+        needs it. Like `explain.py`, this RESTATES journaled state: it cannot
+        raise a stamp and it never names a next move.
+        """
+        return _fit(self.journal_digest(), MAX_RECALL_CHARS)
 
     def _t_finish(self, summary: str):
         self.finished = True
         self.summary = summary
         return "session ended"
+
+    # -- what the run leaves behind ------------------------------------------
+
+    def ending(self) -> dict:
+        """How this run ended, as a fact rather than an absence.
+
+        Three endings look identical on disk today: the model called `finish`,
+        something stopped the run (the turn budget usually), or it simply
+        stopped producing acts. Only the first writes a summary, so the most
+        common ending is the least documented one.
+        """
+        if self.stop_requested:
+            return {"by": "stop", "note": self.summary or "no reason recorded"}
+        if self.finished:
+            return {"by": "finish", "note": self.summary}
+        return {"by": "open", "note": ""}
+
+    def refusals(self) -> list[dict]:
+        """Every instrument that ran and established nothing, with its reason.
+
+        A dead end nobody wrote down is one the next run pays for again. Both
+        kinds count: a tool that raised (the reason is the harness's own error
+        text) and a deductive instrument that returned `verified_by: none` (the
+        reason is the instrument's own notes). Neither is model prose.
+        """
+        from .core.journal import read_trace
+
+        found: list[dict] = []
+        for step in read_trace(self.out)["steps"]:
+            if not step.get("tool") or step.get("mode", "commit") != "commit":
+                continue
+            extra = step.get("extra") or {}
+            refused = bool(step.get("error")) or extra.get("verified_by") == "none"
+            if not refused:
+                continue
+            found.append({
+                "step": step["step"],
+                "tool": step["tool"],
+                "why": str(step.get("result") or "no reason recorded")[:400],
+            })
+        return found
+
+    def inherited_boundary(self) -> int:
+        """The last journal step that is NOT this run's own work.
+
+        Adopting re-dispatches the earlier run's acts through this run's own
+        journal, which is what makes the world exact and what would otherwise
+        credit this run with work it never did. The adopt bookkeeping row sits
+        on the inherited side too: nobody took it as an act.
+        """
+        if not self.adopted:
+            return 0
+        last = self.adopted[-1]
+        return last.get("boundaryStep", last["throughStep"])
+
+    def inherited_steps(self) -> int:
+        """How many acts came from the run this one adopted."""
+        return self.adopted[-1]["throughStep"] if self.adopted else 0
+
+    def metrics(self, proof, report, ending: dict) -> dict:
+        """Mechanical counts for one run, so the harness itself can be read.
+
+        Every number here is counted off the journal or copied from a kernel
+        artifact. `evaluate.py` already computed most of them per evaluation
+        arm; writing them per run means an ordinary run is measurable too,
+        which is what makes a slow harness visible before it wastes a budget.
+
+        Counts are of THIS run's own acts. An adopted run reports what it
+        inherited separately, because a round that replayed forty acts and then
+        took none of its own is not a forty-turn round.
+        """
+        from .core.journal import read_trace
+
+        inherited = self.inherited_boundary()
+        by_tool: dict[str, int] = {}
+        turns = calls = tool_errors = interventions = comments = 0
+        for step in read_trace(self.out)["steps"]:
+            if step.get("step", 0) <= inherited:
+                continue  # an adopted run's act, replayed here but not this run's
+            turns += 1
+            if step.get("error"):
+                tool_errors += 1
+            if step.get("actor") not in (None, "model"):
+                interventions += 1
+            if step.get("kind") == "user_comment":
+                comments += 1
+            if step.get("tool"):
+                calls += 1
+                by_tool[step["tool"]] = by_tool.get(step["tool"], 0) + 1
+        scored = [s for s in self.scored_expectations if s.get("at_step", 0) > inherited]
+        stamp = proof.verified_by if proof is not None else "none"
+        return {
+            "format": "metrics/1",
+            "spec": self.spec.id,
+            "seed": self.seed,
+            "images": self.images,
+            "provider": self.runtime_info.get("provider", ""),
+            "model": self.runtime_info.get("model", ""),
+            "thinking": self.runtime_info.get("thinkingLevel", ""),
+            "ended_by": ending["by"],
+            "turns": turns,
+            "tool_calls": calls,
+            "tool_errors": tool_errors,
+            "human_interventions": interventions,
+            "user_comments": comments,
+            "by_tool": dict(sorted(by_tool.items())),
+            "refusals": len([r for r in self.refusals() if r["step"] > inherited]),
+            "predictions": {
+                "scored": len(scored),
+                "correct": sum(1 for s in scored if s.get("ok")),
+                "open": len(self.open_expectations),
+            },
+            "constructions": sum(
+                1 for e in self.session.world.entities.values() if e.kind != "free"
+            ),
+            "verified_by": stamp,
+            "verdict": (report.verdict if report is not None else ""),
+            # The same meaning evaluate.py gives it: the kernel stamped
+            # something. A Lean-checked sum-of-squares proof carries no
+            # SearchReport, so reading `report.certified` would call it
+            # uncertified while `verified_by` said sandbox+lean.
+            "certified": stamp != "none",
+            "inherited_steps": self.inherited_steps(),
+            "adopted_from": [a["run"] for a in self.adopted],
+        }
 
     # -- kernel finalization -------------------------------------------------
 
@@ -973,7 +1114,7 @@ class AgentRun:
 
     def finalize(self) -> tuple[proof_mod.Proof | None, SearchReport | None, dict]:
         self._transcript.close()
-        from . import library
+        from . import explain, library
 
         report = self.best_report()
         proof = None
@@ -1004,6 +1145,25 @@ class AgentRun:
         )
         if who:
             (self.out / "runtime.json").write_text(json.dumps(who, indent=2))
+        # Written on EVERY ending, not only a `finish`: a run killed by its turn
+        # budget is the case where the model's own summary is empty, and it is
+        # also the case most likely to be picked up again.
+        # Anything the model said after its last act is a journal row too, and
+        # it must land before the counting starts or metrics.json reports one
+        # step fewer than trace.jsonl actually holds.
+        self.trace.flush_pending()
+        ending = self.ending()
+        handoff = explain.handoff_markdown(
+            self.spec, proof, report, self.journal_digest(),
+            config={"vars": _round_vars(self.session.vars), "check": self.session._check()},
+            ending=ending, provenance=provenance, refusals=self.refusals(),
+        )
+        (self.out / "handoff.md").write_text(handoff)
+        artifacts["handoff"] = str(self.out / "handoff.md")
+        (self.out / "metrics.json").write_text(
+            json.dumps(self.metrics(proof, report, ending), indent=2)
+        )
+        artifacts["metrics"] = str(self.out / "metrics.json")
         artifacts["agent_summary"] = str(self.out / "agent_summary.md")
         artifacts["transcript"] = str(self.out / "transcript.jsonl")
         artifacts["trace"] = str(self.trace.path)

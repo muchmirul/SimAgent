@@ -82,6 +82,9 @@ export interface CreateSimAgentRuntimeOptions {
   /** Internal/public for deterministic prefix-replay tests and branch creation. */
   replayJournal?: string;
   replayThrough?: number;
+  /** Continue an earlier run directory: replay it, then re-open it. This is
+   * what makes a turn budget a pause rather than the end of the work. */
+  adopt?: string;
   /** Product sessions use one kernel action per turn so every trace cell is branch-safe. */
   singleToolPerTurn?: boolean;
   /**
@@ -580,6 +583,7 @@ export async function createSimAgentRuntime(
   if (options.repoRoot !== undefined) kernelOptions.repoRoot = options.repoRoot;
   if (options.replayJournal !== undefined) kernelOptions.replayJournal = options.replayJournal;
   if (options.replayThrough !== undefined) kernelOptions.replayThrough = options.replayThrough;
+  if (options.adopt !== undefined) kernelOptions.adopt = options.adopt;
   if (images) kernelOptions.images = true;
   if (options.seed !== undefined) kernelOptions.seed = options.seed;
   const kernel = await KernelClient.start(kernelOptions);
