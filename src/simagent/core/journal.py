@@ -1,6 +1,6 @@
 """Journal — atom #7 (worldline / lab notebook): dynamics made first-class.
 
-Promoted from trace.py. One JSON line per step of the agent's mind:
+One JSON line records each step of the agent's mind:
 
   thought   — narrative/raw thinking that preceded the act
   act       — tool + args (+ transport toolCallId for correlation)
@@ -275,10 +275,6 @@ class Journal:
         self.flush_pending()
         self._fh.write(json.dumps({"event": "end", "steps": self.steps}) + "\n")
         self._fh.close()
-
-
-# Historical name — the recorder was born as TraceRecorder in trace.py.
-TraceRecorder = Journal
 
 
 # -- reading (web viewer, replay, branching) ----------------------------------

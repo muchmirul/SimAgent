@@ -54,5 +54,3 @@ CLAIM = Claim(
         "with 6)."
     ),
 )
-
-SPEC = CLAIM

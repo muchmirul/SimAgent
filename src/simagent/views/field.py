@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..core.space import spaces_for
 from . import _style
 
 
@@ -27,7 +26,7 @@ def render_field(
     yi: int = 1,
     resolution: int = 48,
 ) -> tuple[str, dict]:
-    spaces = spaces_for(spec)
+    spaces = spec.spaces
     if var is None:
         var = next(iter(vars))
     if var not in vars:

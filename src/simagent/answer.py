@@ -12,16 +12,16 @@ import re
 from pathlib import Path
 
 from . import explain
+from .core.claim import Claim
 from .search import SearchReport
-from .spec import ProblemSpec
 
 _VERDICT_TEXT = {
     ("counterexample", True): "DISPROVED — certified counterexample (exact rational arithmetic)",
     ("counterexample", False): "counterexample candidate (numeric only; certification failed)",
-    ("counterexample", None): "counterexample candidate (numeric; no exact certifier on spec)",
+    ("counterexample", None): "counterexample candidate (numeric; no exact certifier on Claim)",
     ("witness", True): "EXISTENCE ESTABLISHED — certified witness (exact rational arithmetic)",
     ("witness", False): "witness candidate (numeric only; certification failed)",
-    ("witness", None): "witness candidate (numeric; no exact certifier on spec)",
+    ("witness", None): "witness candidate (numeric; no exact certifier on Claim)",
     ("holds_on_domain", True): "PROVED on the declared finite domain — every case checked",
     ("no_witness_on_domain", True): "DISPROVED on the declared finite domain — every case checked, no witness",
     ("no_counterexample", None): "no counterexample found — evidence for the conjecture, not a proof",
@@ -163,7 +163,7 @@ def _source_lines(path: Path) -> list[str]:
     ]
 
 
-def write_markdown(spec: ProblemSpec, report: SearchReport, path: Path, proof=None) -> None:
+def write_markdown(spec: Claim, report: SearchReport, path: Path, proof=None) -> None:
     check = report.witness_check or {}
     lines = [
         f"# {spec.title}",
@@ -215,7 +215,7 @@ def _tex_matrix(mat: list[list[str]]) -> str:
     return r"\begin{pmatrix}" + body + r"\end{pmatrix}"
 
 
-def write_latex(spec: ProblemSpec, report: SearchReport, path: Path, proof=None) -> None:
+def write_latex(spec: Claim, report: SearchReport, path: Path, proof=None) -> None:
     rows = _witness_rows(report)
     witness_tex = ""
     if rows:
@@ -300,7 +300,7 @@ def _lean_witness_comment(report: SearchReport) -> str:
     return "\n".join(lines)
 
 
-def write_lean(spec: ProblemSpec, report: SearchReport, path: Path, proof=None) -> None:
+def write_lean(spec: Claim, report: SearchReport, path: Path, proof=None) -> None:
     ident = _lean_ident(spec.id)
     stmt = spec.lean_statement.strip() or "True  -- TODO: formal statement"
     cert_note = ""
@@ -345,7 +345,7 @@ def write_lean(spec: ProblemSpec, report: SearchReport, path: Path, proof=None) 
     path.write_text(header + "\n" + body)
 
 
-def write_answers(spec: ProblemSpec, report: SearchReport, out_dir, proof=None) -> dict[str, str]:
+def write_answers(spec: Claim, report: SearchReport, out_dir, proof=None) -> dict[str, str]:
     out = Path(out_dir)
     md, tex, lean = out / "answer.md", out / "answer.tex", out / "conjecture.lean"
     write_markdown(spec, report, md, proof=proof)

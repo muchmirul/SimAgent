@@ -136,9 +136,11 @@ Each module is described once, here. State it nowhere else.
 - `lean_check.py` + `sandbox/leangen.py` — generated Lean 4 *core*
   certificates (`by decide`, rationals as integer pairs), checked with a bare
   `lean file.lean`. The toolchain IS installed (`~/.elan/bin/lean`, Lean
-  4.32.1, via elan, no sudo, no Mathlib). The checker is fail-closed including
-  `#print axioms` clean. Lean *skeletons* (conjecture.lean) stay UNCHECKED.
-  leangen is capped at d<=3.
+  4.32.1, via elan, no sudo, no Mathlib). The checker rejects Lean commands
+  that can execute I/O, requires `#print axioms` clean, and runs model-written
+  source only inside bubblewrap with no network or writable host tree. If that
+  isolation cannot start, the attempt stays unverified. Lean *skeletons*
+  (conjecture.lean) stay UNCHECKED. leangen is capped at d<=3.
 - `search.py` — random sampling + margin-guided annealing +
   rationalize-and-certify. **Margin convention: margin > 0 ⇔ property holds**;
   search minimizes it for `forall` (counterexamples), maximizes for `exists`.
@@ -162,7 +164,10 @@ Each module is described once, here. State it nowhere else.
 - `core/space.py` is the one domain sampler; each Space declares its own
   dimension.
 - `core/claim.py` owns the closed registries (MEASURES, CONSTRAINTS,
-  CERTIFIERS, LEANS, SCENES) and `validate_claim()`, the gate for LLM output.
+  CERTIFIERS, LEANS, SCENES), the only `claim/1` loader, and
+  `validate_claim()`, the hard gate for every input path. IDs are safe slugs
+  because they become run-directory names. Legacy executable specs are
+  refused, not compiled.
 - `core/expr.py` is the GENERAL vocabulary: one safe arithmetic AST
   (whitelist, no exec/eval) drives three evaluators — float (search), exact
   sympy (certify), Lean Q-terms (stamp) — behind the `expr`
@@ -180,8 +185,7 @@ Each module is described once, here. State it nowhere else.
   with no pin RAISES and the claim keeps its `sandbox` stamp, because a
   certificate over an unpinned derived value would check a bare number and
   prove nothing about its construction.
-- `core/journal.py` is the mind trace. `trace.py` is a compatibility shim that
-  re-exports it; new code imports `core.journal` directly.
+- `core/journal.py` is the mind trace and its only import path.
 - `views/` is the eighth atom plus the analytical output views: `identity`
   (scene graph as-is, d<=3), `field` (margin over a 2D slice; the zero-contour
   is the theorem's shape), `sweep` (margin along one coordinate, zero
@@ -209,9 +213,6 @@ Each module is described once, here. State it nowhere else.
   certificate rather than left as evidence; `circumcenter-in-4simplex` (ℝ⁴) is
   the dimension-agnostic test: certified counterexample, verified_by
   "sandbox", with the explicit no-Lean-above-d3 notice printed by answer.py.
-- `spec.py` is the deprecated legacy compatibility path. It still compiles old
-  exec-code disk specs; `ProblemSpec.load` routes native `claim/1` JSON to
-  `core.claim`. Bundled and LLM-created problems use Claims.
 - `llm.py` is the formalizer. It asks whatever model pi routes, through the
    same control service agent runs use (`structured` op → `_ask`), so the
    front door is not pinned to one vendor while the main hall is open to any.

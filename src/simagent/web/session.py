@@ -5,9 +5,9 @@ full authoritative state (vars + scene graph + check) so the frontend stays a
 dumb renderer.
 
 Since P2 the session is a thin shell over the core atoms: state lives in a
-core.entity.World (free entities from the spec's domain Spaces) and every
-mutation flows through core.op.apply_op — the session adds only the
-spec-compiled check/scene glue and the kept-best report discipline.
+core.entity.World (free entities from the Claim's Spaces) and every mutation
+flows through core.op.apply_op. The session adds only the Claim engine's
+check/scene glue and the kept-best report discipline.
 """
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ from pathlib import Path
 
 import numpy as np
 
+from ..core.claim import Claim, require_valid_claim
 from ..core.entity import World
 from ..core.op import apply_op
-from ..core.space import sample_vars, spaces_for
+from ..core.space import sample_vars
 from ..search import (
     SearchReport,
     certify_candidate,
@@ -27,7 +28,6 @@ from ..search import (
     run_exhaustive,
     run_search,
 )
-from ..spec import ProblemSpec
 
 
 _DECISIVE = frozenset(
@@ -47,19 +47,19 @@ def _report_rank(report: SearchReport | None) -> int:
 
 
 class SandboxSession:
-    def __init__(self, spec: ProblemSpec, out_dir, seed: int = 0):
-        self.spec = spec
-        self.comp = spec.compiled()
+    def __init__(self, spec: Claim, out_dir, seed: int = 0):
+        self.spec = require_valid_claim(spec)
+        self.comp = self.spec.compiled()
         self.out = Path(out_dir)
         self.out.mkdir(parents=True, exist_ok=True)
-        spec.save(self.out / "spec.json")
+        self.spec.save(self.out / "spec.json")
         # The starting configuration. Runs that must be independent (evaluation
         # seeds) differ only here, so a fixed 0 would make every "seed" the same
         # experiment repeated.
         self.rng = np.random.default_rng(seed)
         self._hunt_seed = seed
         self.world = World()
-        for name, space in spaces_for(spec).items():
+        for name, space in self.spec.spaces.items():
             self.world.add_free(name, space)
         self.last_report: SearchReport | None = None  # most recent search result
         self.best_report: SearchReport | None = None  # strongest kept so far (never downgrades)

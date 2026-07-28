@@ -111,9 +111,9 @@ def load_manifest(path: str | Path | None = None) -> dict:
 
 
 def _load_task_spec(task: dict, repo_root: Path):
-    from .spec import ProblemSpec
+    from .core.claim import Claim
 
-    return ProblemSpec.load(repo_root / task["spec"])
+    return Claim.load(repo_root / task["spec"])
 
 
 def seed_settles_the_claim(spec, seed: int) -> bool:

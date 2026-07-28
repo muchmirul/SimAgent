@@ -3,11 +3,10 @@ sampler/perturber/enumerator, and dimension-agnostic (d=5 works like d=2)."""
 import numpy as np
 import pytest
 
-from simagent.core.space import Box, IntBox, from_varspec, spaces_for
+from simagent.core.space import Box, IntBox, sample_vars
 from simagent.library import get
 from simagent.sandbox.certify import exact_repr, rationalize_array, to_float
 from simagent.search import _int_repr, case_count, int_domain_exact
-from simagent.spec import VarSpec, sample_vars
 
 
 def test_sample_vars_bitwise_matches_historical_formula():
@@ -20,8 +19,7 @@ def test_sample_vars_bitwise_matches_historical_formula():
 
 
 def test_intbox_sample_matches_historical_formula():
-    v = VarSpec(name="n", shape=[], low=0, high=200, kind="int")
-    a = from_varspec(v).sample(np.random.default_rng(3))
+    a = IntBox(shape=(), low=0, high=200).sample(np.random.default_rng(3))
     b = np.random.default_rng(3).integers(0, 201, size=()).astype(float)
     assert np.array_equal(a, b)
 
@@ -55,8 +53,8 @@ def test_case_count_and_int_exact_via_spaces():
     tri = get("circumcenter-in-triangle")
     assert case_count(tri) is None  # continuous domain
     assert int_domain_exact(tri) is False
-    big = VarSpec(name="n", shape=[], low=0, high=2**41, kind="int")
-    assert from_varspec(big).int_exact is False  # beyond the 2^40 exactness guard
+    big = IntBox(shape=(), low=0, high=2**41)
+    assert big.int_exact is False  # beyond the 2^40 exactness guard
 
 
 def test_rationalize_any_ndim_roundtrip():
@@ -83,7 +81,7 @@ def test_int_repr_any_ndim():
 
 def test_perturb_matches_historical_refine_move():
     spec = get("circumcenter-in-triangle")
-    spaces = spaces_for(spec)
+    spaces = spec.spaces
     v = spec.domain[0]
     cur = np.zeros(tuple(v.shape))
     a = spaces[v.name].perturb(np.random.default_rng(11), cur, 0.15)

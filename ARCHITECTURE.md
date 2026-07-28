@@ -172,8 +172,9 @@ compromise: the harness is the subject of the work, so the model is a variable
 in it. Docs that name one model do so as an EXAMPLE, never as a requirement.
 
 That freedom has one cost, and the harness pays it by recording. With no
-`--provider/--model` the runtime takes the first authenticated VISION model pi
-has, which is convenient and silent, and silent is the problem: a transcript
+`--provider/--model` the numbers-first runtime takes the first authenticated
+model pi has. An image-channel run takes the first authenticated vision model.
+That is convenient and silent, and silent is the problem: a transcript
 with no model attached cannot be compared with anything. So the choice is run
 PROVENANCE. `KernelTransport.set_runtime` records provider, model and thinking
 level; `AgentRun.finalize` writes `runtime.json` and puts the same line at the
@@ -259,13 +260,17 @@ under the operations, and cross-multiplied `qeq/qlt` then coincide with `=`/`<`
 on ℚ. That two-line closure argument is the entire trusted modeling step —
 everything else is kernel-checked arithmetic on explicit numerals.
 
-The checker is **fail-closed and does not trust the source** (which is
-spec-controlled). It rejects unless ALL hold: no `sorry`/`admit`/`sorryAx`/
-`native_decide` token (comments stripped first); clean exit with no sorry
-warning; the source names ≥1 `#print axioms <thm>` and Lean reports *each named
-theorem* axiom-free by name; and no `depends on axioms` line appears anywhere.
-Binding axiom-freedom to the printed theorem *names* is what stops a source
-from echoing the clean phrase to spoof the check.
+The checker is **fail-closed**. Every source rejects proof holes and Lean
+commands that can execute I/O before Lean starts. Closed generators then run
+from a temporary working directory. Model-written Lean has a stronger rule: it
+runs only inside working Linux bubblewrap isolation, with no network, no home
+or checkout mounted, and only a temporary directory writable. If that sandbox
+is missing or blocked, the attempt stays `verified_by: none` and says why.
+
+Acceptance still requires a clean exit, at least one named `#print axioms
+<thm>`, an axiom-free line for every named theorem, and no `depends on axioms`
+line anywhere. Binding axiom-freedom to theorem names stops a source from
+echoing the clean phrase to spoof the check.
 
 **Trust vs. faithfulness.** A `sandbox+lean` stamp means the Lean kernel
 accepted the certificate. For a bundled spec that certificate is reviewed, so
@@ -317,7 +322,7 @@ web/app.py ──JSONL──▶ pi_agent.py ──JSONL──▶ agent/dist/serv
                                                 │
   Ops mutate the world · derive recomputes · the measure returns the margin
                                                 │
-  ├──▶ tool result to the model (text; `look` returns a real PNG: the vision channel)
+  ├──▶ tool result to the model (text always; tool PNGs only when images are on)
   ├──▶ kernel-journal.jsonl (call + state hash) and trace.jsonl (the cell)
   └──▶ finish: mechanized_proof stamps verified_by ──▶ proof.json + answer.md ──▶ verdict cell
 ```
@@ -331,9 +336,10 @@ each stage, and each rewrite buys one specific thing: float (numpy) buys speed
 for search and can only ever PROPOSE; exact rational (sympy) buys a verdict
 independent of floating point; Lean integer pairs buy a verdict independent of
 this codebase; the scene graph buys perception, and feeds mpl, Manim and
-three.js from one source so the picture a human clicks is the one the agent
-saw. `equation_of_state` adds a fifth, for reading only: symbols follow the
-world, never the reverse.
+three.js from one source so the human views one kernel state. When images are
+on, tool pictures from that same state also reach the model.
+`equation_of_state` adds a fifth, for reading only: symbols follow the world,
+never the reverse.
 
 ## Agent mode (pi control plane)
 
@@ -396,7 +402,8 @@ src/simagent/
   search.py      sampled search + annealing (Space.perturb) + exact certify;
                  exhaustive enumeration (Space.enumerate_cases) — fail-closed
   proof.py       the proof kernel (methods, Proof, verified_by) — sole verdict authority
-  lean_check.py  run Lean core on generated sources; fail-closed acceptance
+  lean_check.py  run generated Lean core; isolate model-written source;
+                 fail-closed acceptance
   sandbox/       geometry.py (numeric, d-generic simplex math + hull_facets),
                  certify.py (sympy exact, any-ndim rationalization),
                  scene.py (scene graph), leangen.py (Lean certs; d<=3 cap
@@ -419,8 +426,6 @@ src/simagent/
                  annotations, stop, hash-verified prefix replay, toolCallId
                  correlation
   pi_agent.py    thin client for the TypeScript pi control service
-  spec.py        LEGACY exec'd-code contract (deprecated; loader only)
-  trace.py       shim → core.journal
   play.py, web/  shells: terminal REPL and the reasoning-notebook UI over the
                  same kernel (trace replay/live-follow via /api/runs,
                  /api/trace; agent sessions via /api/agent/start)

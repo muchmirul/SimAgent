@@ -16,7 +16,7 @@ import re
 
 import numpy as np
 
-from .spec import ProblemSpec
+from .core.claim import Claim
 from .visualize import mpl
 from .visualize.manim_gen import try_render_manim, write_manim_scene
 from .web.session import SandboxSession
@@ -40,7 +40,7 @@ _HELP = """commands:
 class PlayShell(cmd.Cmd):
     prompt = "(sandbox) "
 
-    def __init__(self, spec: ProblemSpec, out_dir, stdout=None):
+    def __init__(self, spec: Claim, out_dir, stdout=None):
         super().__init__(stdout=stdout)
         # All state lives in a SandboxSession — the same kernel shell the
         # agent and the web UI drive, so every mutation flows through core.op.
@@ -185,7 +185,7 @@ class PlayShell(cmd.Cmd):
         )
         self._p(f"numeric: holds={holds}")
         if certified is None:
-            self._p("no exact certifier on this spec — numeric only")
+            self._p("no exact certifier on this Claim — numeric only")
         elif certified:
             what = "property FAILS" if not holds else "property HOLDS"
             self._p(f"CERTIFIED in exact rationals: {what} for this configuration")
@@ -225,7 +225,7 @@ class PlayShell(cmd.Cmd):
     do_EOF = do_quit
 
 
-def launch(spec: ProblemSpec, out_dir) -> None:
+def launch(spec: Claim, out_dir) -> None:
     shell = PlayShell(spec, out_dir)
     print(f"== {spec.title} ==")
     print(spec.conjecture)

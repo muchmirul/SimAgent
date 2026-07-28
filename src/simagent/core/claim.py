@@ -8,10 +8,9 @@ LLM-emitted code strings; AlphaGeometry-proven). A native Claim is
 consumes (`domain`, `quantifier`, `compiled()`, `save()`, …), so the truth
 layer runs on Claims unchanged.
 
-Engines:
-- **native**: recipe + registry keys (bundled library, LLM formalizer output)
-- **legacy**: wraps a historical ProblemSpec via `claim_from_spec`
-  (kept one release for old disk specs; the exec path is deprecated)
+The engine is native: recipe and registry keys only. Executable legacy specs
+are rejected at the loading boundary, so loading a problem can never execute
+code from that problem.
 
 Only the truth layer decides claims; a Claim carries no verdict state.
 """
@@ -19,6 +18,8 @@ from __future__ import annotations
 
 import ast
 import json
+import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,15 +29,22 @@ from ..sandbox import geometry, leangen, scene
 from ..sandbox import certify as certify_mod
 from . import expr
 from .derive import CONSTRUCTORS
-from .space import Box, GraphSpace, IntBox, Space, spaces_for
+from .space import Box, GraphSpace, IntBox, Space
 
 CLAIM_FORMAT = "claim/1"
+CLAIM_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+_CLAIM_ID = re.compile(CLAIM_ID_PATTERN)
+_ENTITY_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_LEAN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class ClaimValidationError(ValueError):
+    """A Claim failed the executable contract and must not be run."""
 
 
 @dataclass(frozen=True)
 class FreeVar:
-    """Duck-typed VarSpec: what samplers/search need to know about a free
-    entity (core cannot import spec.py — layering)."""
+    """Flat description of one free entity for prompts and enumeration."""
 
     name: str
     shape: list[int]
@@ -597,33 +605,15 @@ class Claim:
     assume: list[str] = field(default_factory=list)
     lean_statement: str = ""
     notes: str = ""
-    # legacy engine (adapter): the wrapped spec
-    _spec: object | None = None
-
-    # -- engines -------------------------------------------------------------
-
-    @property
-    def is_native(self) -> bool:
-        return self._spec is None
-
-    def to_speclike(self):
-        """What search/proof machinery consumes. Native claims ARE spec-like;
-        legacy claims defer to their wrapped spec."""
-        return self if self._spec is None else self._spec
 
     def compiled(self):
-        if self._spec is not None:
-            return self._spec.compiled()
         if self.measure is None or self.scene is None:
             raise ValueError(f"claim {self.id!r} has no native measure/scene")
         return NativeEngine(self)
 
-    # -- spec-like surface (duck-typed VarSpec list) ---------------------------
-
     @property
     def domain(self) -> list[FreeVar]:
-        if self._spec is not None:
-            return self._spec.domain
+        """Flat descriptions in the same insertion order as ``spaces``."""
         out = []
         for name, space in self.spaces.items():
             kind = "real"
@@ -645,8 +635,6 @@ class Claim:
     # -- persistence -----------------------------------------------------------
 
     def to_json(self) -> dict:
-        if self._spec is not None:
-            return self._spec.to_json()
         return {
             "format": CLAIM_FORMAT,
             "id": self.id, "title": self.title, "conjecture": self.conjecture,
@@ -672,87 +660,177 @@ class Claim:
     def from_json(cls, data: dict) -> "Claim":
         if data.get("format") != CLAIM_FORMAT:
             raise ValueError(f"not a {CLAIM_FORMAT} document")
+        raw_spaces = data.get("spaces", [])
+        if not isinstance(raw_spaces, list):
+            raise ValueError("spaces must be a list")
         spaces: dict[str, Space] = {}
-        for s in data["spaces"]:
-            shape = tuple(s["shape"])
-            if s.get("kind") in ("graph", "graph_iso"):
-                spaces[s["name"]] = GraphSpace(
-                    n=int(shape[0]), up_to_iso=s.get("kind") == "graph_iso")
-            elif s.get("kind") == "int":
-                spaces[s["name"]] = IntBox(shape=shape, low=int(s["low"]), high=int(s["high"]))
+        for s in raw_spaces:
+            if not isinstance(s, dict):
+                raise ValueError(f"space entry must be an object, got {s!r}")
+            name = s.get("name")
+            if name in spaces:
+                raise ValueError(f"duplicate space name {name!r}")
+            raw_shape = s.get("shape")
+            if not isinstance(raw_shape, list) or any(
+                not isinstance(d, int) or isinstance(d, bool) or d < 0 for d in raw_shape
+            ):
+                raise ValueError(f"space {name!r} has an invalid shape: {raw_shape!r}")
+            shape = tuple(raw_shape)
+            kind = s.get("kind", "real")
+            if kind in ("graph", "graph_iso"):
+                if len(shape) != 2 or shape[0] < 1 or shape[0] != shape[1]:
+                    raise ValueError(f"graph space {name!r} needs square shape [n, n]")
+                spaces[name] = GraphSpace(
+                    n=int(shape[0]), up_to_iso=kind == "graph_iso")
+            elif kind == "int":
+                low, high = s["low"], s["high"]
+                if (
+                    isinstance(low, bool) or isinstance(high, bool)
+                    or not isinstance(low, (int, float))
+                    or not isinstance(high, (int, float))
+                    or float(low) != int(low) or float(high) != int(high)
+                ):
+                    raise ValueError(f"integer space {name!r} needs integer bounds")
+                spaces[name] = IntBox(shape=shape, low=int(low), high=int(high))
+            elif kind == "real":
+                spaces[name] = Box(
+                    shape=shape, low=float(s["low"]), high=float(s["high"])
+                )
             else:
-                spaces[s["name"]] = Box(shape=shape, low=float(s["low"]), high=float(s["high"]))
+                raise ValueError(f"space {name!r} has unknown kind {kind!r}")
         return cls(
             id=data["id"], title=data["title"], conjecture=data["conjecture"],
             latex=data["latex"], quantifier=data["quantifier"], spaces=spaces,
-            recipe=list(data.get("recipe") or []),
+            recipe=data.get("recipe") if data.get("recipe") is not None else [],
             measure=data.get("measure"), constraint=data.get("constraint"),
             certify=data.get("certify"), lean=data.get("lean"), scene=data.get("scene"),
-            assume=list(data.get("assume") or []),
+            assume=data.get("assume") if data.get("assume") is not None else [],
             lean_statement=data.get("lean_statement", ""), notes=data.get("notes", ""),
         )
 
     @classmethod
     def load(cls, path) -> "Claim":
-        return cls.from_json(json.loads(Path(path).read_text()))
+        data = json.loads(Path(path).read_text())
+        if not isinstance(data, dict) or data.get("format") != CLAIM_FORMAT:
+            raise ValueError(
+                f"only {CLAIM_FORMAT} documents are supported; executable legacy specs "
+                "are refused"
+            )
+        return require_valid_claim(cls.from_json(data))
 
 
-def claim_from_spec(spec) -> Claim:
-    """Adapter: run any historical ProblemSpec as a Claim (legacy engine)."""
-    return Claim(
-        id=spec.id,
-        title=spec.title,
-        conjecture=spec.conjecture,
-        latex=spec.latex,
-        quantifier=spec.quantifier,
-        spaces=spaces_for(spec),
-        _spec=spec,
-    )
-
-
-# -- validation (the gate for LLM-formalized claims) --------------------------
+# -- validation: the gate for every Claim ------------------------------------
 
 def validate_claim(claim: Claim, samples: int = 8, seed: int = 0) -> list[str]:
-    """Sandbox-check a native claim: registry keys exist, the recipe resolves,
-    margin/holds are consistent on real samples, the scene renders. Mirrors
-    the historical validate_spec contract — the LLM's output passes this gate
-    or is sent back for repair."""
+    """Check the complete executable Claim contract without minting a verdict."""
     errors: list[str] = []
+    if not isinstance(claim.id, str) or len(claim.id) > 80 or not _CLAIM_ID.fullmatch(claim.id):
+        errors.append(
+            "id must be 1-80 lowercase letters or digits joined by single hyphens"
+        )
+    for field_name in ("title", "conjecture", "latex"):
+        value = getattr(claim, field_name)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{field_name} must be a non-empty string")
     if claim.quantifier not in ("forall", "exists"):
         errors.append(f"quantifier must be forall/exists, got {claim.quantifier!r}")
     if not claim.spaces:
         errors.append("claim needs at least one free entity (a Space)")
-    if claim.measure is None or claim.measure.get("kind") not in MEASURES:
-        errors.append(f"unknown or missing measure: {claim.measure!r}")
-    if claim.scene is None or claim.scene.get("kind") not in SCENES:
-        errors.append(f"unknown or missing scene: {claim.scene!r}")
-    if claim.constraint is not None and claim.constraint.get("kind") not in CONSTRAINTS:
-        errors.append(f"unknown constraint: {claim.constraint!r}")
-    if claim.certify is not None and claim.certify.get("kind") not in CERTIFIERS:
-        errors.append(f"unknown certifier: {claim.certify!r}")
-    if claim.lean is not None and claim.lean.get("kind") not in LEANS:
-        errors.append(f"unknown lean hook: {claim.lean!r}")
-    known = set(claim.spaces)
-    for step in claim.recipe:
-        if step.get("ctor") not in CONSTRUCTORS:
-            errors.append(f"unknown constructor {step.get('ctor')!r}")
+    for name, space in claim.spaces.items():
+        if not isinstance(name, str) or not _ENTITY_NAME.fullmatch(name):
+            errors.append(f"space name must be an identifier, got {name!r}")
+        if not isinstance(space, Space):
+            errors.append(f"space {name!r} is not a Space")
             continue
-        for a in step.get("args", ()):
-            if a not in known:
-                errors.append(f"recipe step {step.get('name')!r}: unknown argument {a!r}")
-        known.add(step.get("name"))
-    for src in claim.assume:
+        if any(not isinstance(d, int) or isinstance(d, bool) or d < 0 for d in space.shape):
+            errors.append(f"space {name!r} has an invalid shape {space.shape!r}")
+        try:
+            low, high = float(space.low), float(space.high)
+        except (TypeError, ValueError):
+            errors.append(f"space {name!r} bounds must be numbers")
+            continue
+        if not math.isfinite(low) or not math.isfinite(high):
+            errors.append(f"space {name!r} bounds must be finite")
+        elif high < low:
+            errors.append(f"space {name!r} low ({low}) must be <= high ({high})")
+
+    selections = (
+        ("measure", claim.measure, MEASURES, True),
+        ("scene", claim.scene, SCENES, True),
+        ("constraint", claim.constraint, CONSTRAINTS, False),
+        ("certify", claim.certify, CERTIFIERS, False),
+        ("lean", claim.lean, LEANS, False),
+    )
+    for slot, block, registry, required in selections:
+        if block is None:
+            if required:
+                errors.append(f"missing {slot}")
+            continue
+        if not isinstance(block, dict):
+            errors.append(f"{slot} must be an object, got {block!r}")
+            continue
+        kind = block.get("kind")
+        if not isinstance(kind, str) or kind not in registry:
+            errors.append(f"unknown {slot} kind: {kind!r}")
+            continue
+        for param in registry[kind]["params"]:
+            if param not in block:
+                errors.append(f"{slot} kind {kind!r} needs parameter {param!r}")
+    if isinstance(claim.lean, dict):
+        theorem = claim.lean.get("theorem")
+        if theorem is not None and (
+            not isinstance(theorem, str) or not _LEAN_NAME.fullmatch(theorem)
+        ):
+            errors.append(f"lean theorem must be an identifier, got {theorem!r}")
+
+    known = set(claim.spaces)
+    if not isinstance(claim.recipe, list):
+        errors.append("recipe must be a list")
+        recipe = []
+    else:
+        recipe = claim.recipe
+    for step in recipe:
+        if not isinstance(step, dict):
+            errors.append(f"recipe step must be an object, got {step!r}")
+            continue
+        name, ctor, args = step.get("name"), step.get("ctor"), step.get("args")
+        if not isinstance(name, str) or not _ENTITY_NAME.fullmatch(name):
+            errors.append(f"recipe step name must be an identifier, got {name!r}")
+        elif name in known:
+            errors.append(f"recipe entity {name!r} is declared more than once")
+        if not isinstance(ctor, str) or ctor not in CONSTRUCTORS:
+            errors.append(f"unknown constructor {ctor!r}")
+            continue
+        if not isinstance(args, list):
+            errors.append(f"recipe step {name!r}: args must be a list")
+            continue
+        if len(args) != CONSTRUCTORS[ctor]["arity"]:
+            errors.append(
+                f"recipe step {name!r}: {ctor} needs {CONSTRUCTORS[ctor]['arity']} "
+                f"arguments, got {len(args)}"
+            )
+        for a in args:
+            if not isinstance(a, str) or a not in known:
+                errors.append(f"recipe step {name!r}: unknown argument {a!r}")
+        if isinstance(name, str) and _ENTITY_NAME.fullmatch(name) and name not in known:
+            known.add(name)
+    if not isinstance(claim.assume, list):
+        errors.append("assume must be a list")
+        assumptions = []
+    else:
+        assumptions = claim.assume
+    for src in assumptions:
         try:
             unknown = expr.names(expr.parse(src)) - known
-        except expr.ExprError as e:
+        except (expr.ExprError, TypeError) as e:
             errors.append(f"assumption rejected: {e}")
             continue
         if unknown:
             errors.append(f"assumption reads unknown entities: {sorted(unknown)}")
-    if claim.measure is not None and claim.measure.get("kind") == "expr":
+    if isinstance(claim.measure, dict) and claim.measure.get("kind") == "expr":
         try:
             tree = expr.parse(claim.measure.get("margin"))
-        except expr.ExprError as e:
+        except (expr.ExprError, TypeError) as e:
             errors.append(f"measure expression rejected: {e}")
         else:
             unknown = expr.names(tree) - known
@@ -762,7 +840,7 @@ def validate_claim(claim: Claim, samples: int = 8, seed: int = 0) -> list[str]:
         # measured would prove nothing about this claim: fail closed.
         for slot in ("certify", "lean"):
             block = getattr(claim, slot)
-            if block is not None and block.get("kind") == "expr":
+            if isinstance(block, dict) and block.get("kind") == "expr":
                 if block.get("margin") != claim.measure.get("margin"):
                     errors.append(
                         f"{slot} margin must repeat the measure's margin verbatim"
@@ -773,9 +851,10 @@ def validate_claim(claim: Claim, samples: int = 8, seed: int = 0) -> list[str]:
     engine = claim.compiled()
     rng = np.random.default_rng(seed)
     got = 0
+    last_vars = None
     for _ in range(samples * 25):
-        vars = {n: s.sample(rng) for n, s in claim.spaces.items()}
         try:
+            vars = {n: s.sample(rng) for n, s in claim.spaces.items()}
             if not engine.valid(**vars):
                 continue
         except Exception as e:  # noqa: BLE001
@@ -791,13 +870,35 @@ def validate_claim(claim: Claim, samples: int = 8, seed: int = 0) -> list[str]:
             return errors
         if got == 0:
             try:
-                if not engine.build_scene(**vars):
-                    errors.append("scene builder returned an empty scene")
+                built = engine.build_scene(**vars)
+                if not isinstance(built, list) or not built:
+                    errors.append("scene builder must return a non-empty list")
             except Exception as e:  # noqa: BLE001
                 errors.append(f"scene raised: {type(e).__name__}: {e}")
         got += 1
+        last_vars = vars
         if got >= samples:
             break
     if got == 0:
         errors.append("could not draw any valid sample (constraint too strict?)")
+    elif engine.has_certify and last_vars is not None:
+        try:
+            exact = {
+                name: claim.spaces[name].exact(value)
+                for name, value in last_vars.items()
+            }
+            engine.certify(**exact)
+        except Exception as e:  # noqa: BLE001 - a broken exact hook invalidates the Claim
+            errors.append(f"certifier raised: {type(e).__name__}: {e}")
     return errors
+
+
+def require_valid_claim(claim: Claim, samples: int = 8, seed: int = 0) -> Claim:
+    """Return ``claim`` or stop before any execution or artifact is created."""
+    errors = validate_claim(claim, samples=samples, seed=seed)
+    if errors:
+        raise ClaimValidationError(
+            f"claim {getattr(claim, 'id', '<unknown>')!r} failed validation:\n- "
+            + "\n- ".join(errors)
+        )
+    return claim

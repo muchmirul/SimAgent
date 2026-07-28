@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..library import all_specs, get
-from ..spec import ProblemSpec
+from ..core.claim import Claim
 from .. import explain
 from ..core.journal import TRACE_FILE, read_trace
 from ..sandbox import scene as scene_mod
@@ -127,16 +127,16 @@ def _combined_scene(lanes: list[dict]) -> list[dict]:
     return combined
 
 
-def _disk_specs() -> dict[str, tuple[ProblemSpec, Path]]:
+def _disk_specs() -> dict[str, tuple[Claim, Path]]:
     """Spec files in ./problems, keyed by id. A broken file is skipped with a
     printed reason: silence would look like the file was never there."""
-    found: dict[str, tuple[ProblemSpec, Path]] = {}
+    found: dict[str, tuple[Claim, Path]] = {}
     root = Path(PROBLEMS_DIR)
     if not root.is_dir():
         return found
     for path in sorted(root.glob("*.json")):
         try:
-            spec = ProblemSpec.load(path)
+            spec = Claim.load(path)
         except Exception as exc:  # a user-authored file, so say what is wrong
             print(f"problems/{path.name}: skipped ({exc})")
             continue
@@ -283,7 +283,10 @@ def create_app(
     @app.post("/api/load")
     def load(body: LoadBody) -> dict:
         if body.spec_path:
-            spec = ProblemSpec.load(body.spec_path)
+            try:
+                spec = Claim.load(body.spec_path)
+            except (OSError, ValueError) as exc:
+                raise HTTPException(422, f"claim file refused: {exc}") from exc
         elif body.problem_id:
             try:
                 spec = get(body.problem_id)
@@ -408,8 +411,9 @@ def create_app(
         viewer can poll and follow a live agent."""
         d = run_dir(run)
         out = read_trace(d, after=after)
-        # A `look` image is a record of what the agent saw, saved at that
-        # moment, so it is drawn in whatever style the renderer had then. Runs
+        # A saved tool image is the notebook's record of that state. In an
+        # image-channel run it was also model input. It was drawn in whatever
+        # style the renderer had then, so runs
         # older than the current renderer would therefore fill the notebook
         # with pictures in a style nothing else uses. Flag those: the UI draws
         # the same state fresh instead, and the saved file stays untouched on
@@ -605,7 +609,7 @@ def create_app(
                 problem_id = None
         if spec_path is not None and approved_intake is None:
             approved_intake = intake_mod.record(
-                ProblemSpec.load(spec_path), str(spec_path), "spec-file")
+                Claim.load(spec_path), str(spec_path), "spec-file")
         if not problem_id and spec_path is None:
             from ..llm import FormalizeError, FormalizeRefused, formalize_recorded
 

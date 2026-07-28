@@ -48,8 +48,9 @@ The spirit (why this exists):
   plan / look / sample / set_var / nudge / check / refine / hunt / exhaust /
   certify / submit_lean_proof / finish. Cooperative stop. Verdicts only from
   kernel state.
-- **Mind trace** (`src/simagent/trace.py` → `trace.jsonl`): per step — the
-  model's thought (incl. raw thinking), the act, the scene graph, an equation
+- **Mind trace** (the v0.1 path was `trace.py`; now `core/journal.py` writes
+  `trace.jsonl`): each step records the model's thought, the act, the scene
+  graph, an equation
   translation, and a diff vs the previous step.
 - **Reasoning notebook** (`src/simagent/web/`): In[]/Out[] cells streaming the
   trace live (approach/thinking/act/picture/equations/diff), interactive
@@ -238,22 +239,21 @@ rational arithmetic (sandbox) only."*
 - **P2 — Entity/Op/Derive (2).** Recipe model; SandboxSession = thin shell
   over `apply_op` (public API unchanged). Gate: fork isolation + recompute
   tests; existing web/agent tests untouched.
-- **P3 — Measure/Claim/Journal (2).** Qualitative predicates; Claim +
-  `claim_from_spec` adapter (bundled specs run as Claims unmodified);
-  trace.py → core/journal.py (mode, annotation events, replay(), prefix-fork).
-  Gate: adapter equivalence (same seeds → same SearchReport); golden traces
-  old + new format.
+- **P3 — Measure/Claim/Journal (2).** Qualitative predicates; Claim plus the
+  temporary migration adapter that P5 later removed; journal promotion into
+  `core/journal.py` (mode, annotation events, replay(), prefix-fork).
+  Gate at the time: adapter equivalence and golden old/new traces.
 - **P4 — Views/probe/imagine (2).** views/ package; imagine + probe tools;
   hull split (generic `hull_facets` d≤8 fail-closed; 3D pair kept for the
   Euler spec); notebook Im-cells + view cells. Gate: triangle field view's
   zero-contour = Thales circle (metadata assert); imagine leaves mainline
   untouched; kernel-ops rejected inside imagine.
-- **P5 — construct/expect/native Claims/exec retirement (2).** construct +
-  expect + chips; bundled specs → native Claims; NEW known-answer
-  **circumcenter_4simplex (d=4): certified counterexample, sandbox-only
-  verdict, explicit d>3 wording**; formalize emits Claim JSON (closed menu +
-  repair loop); THEN delete exec paths and path shims (release tag first).
-  Gate: all ground truths with zero exec'd strings; hardening tests untouched.
+- **P5 — construct/expect/native Claims/exec retirement (landed).** construct +
+  expect + chips; bundled specs became native Claims; the d=4 known-answer gate
+  landed; formalize emits `claim/1`; executable spec paths and migration shims
+  are now deleted. Old traces remain readable, while old code-bearing problem
+  files are refused. Gate: all ground truths with no `exec` or `eval` call in
+  production source.
 - **P6 - pi integration (landed).** `agent/` is the exact-pinned pi runtime and
   session service; the Python provider backends and web job runner are gone.
   Notebook and CLI launch pi sessions through a strict JSONL control bridge.

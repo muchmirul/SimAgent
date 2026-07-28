@@ -1,6 +1,6 @@
 """SimAgent: play with conjectures in a sandbox instead of fighting equations.
 
-Pipeline: conjecture -> ProblemSpec -> sandbox simulation -> 3D visualization
+Pipeline: conjecture -> native Claim -> sandbox simulation -> visualization
 -> automated search (counterexample / witness) -> exact certification ->
 answer (Markdown + LaTeX + Lean skeleton).
 """

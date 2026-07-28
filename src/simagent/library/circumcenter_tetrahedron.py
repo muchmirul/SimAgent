@@ -43,5 +43,3 @@ CLAIM = Claim(
     ),
     notes="False: sliver tetrahedra near a common sphere throw the center out.",
 )
-
-SPEC = CLAIM

@@ -43,5 +43,3 @@ CLAIM = Claim(
         "declared window."
     ),
 )
-
-SPEC = CLAIM

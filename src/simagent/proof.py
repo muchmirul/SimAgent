@@ -33,9 +33,9 @@ from pathlib import Path
 import sympy as sp
 
 from . import lean_check
+from .core.claim import Claim
 from .sandbox import certify as certify_mod
 from .search import SearchReport
-from .spec import ProblemSpec
 
 
 class Method(str, Enum):
@@ -55,6 +55,15 @@ MECHANIZED: frozenset[Method] = frozenset(
     {Method.COUNTEREXAMPLE, Method.CONSTRUCTION, Method.EXHAUSTION}
 )
 DEDUCTIVE: frozenset[Method] = frozenset(Method) - MECHANIZED
+
+# One ordering for every keep-best decision. It follows the documented trust
+# ladder: an exact sandbox check outranks a model-written Lean statement whose
+# faithfulness still needs review.
+VERIFICATION_RANK = {"sandbox+lean": 3, "sandbox": 2, "lean": 1, "none": 0}
+
+
+def verification_rank(stamp: str | None) -> int:
+    return VERIFICATION_RANK.get(stamp or "none", -1)
 
 
 @dataclass
@@ -81,7 +90,7 @@ def _exact_from_repr(rep) -> sp.Matrix | sp.Rational:
     return sp.Matrix([[sp.Rational(x) for x in row] for row in rep])
 
 
-def _attach_lean(proof: Proof, spec: ProblemSpec, report: SearchReport, out_dir) -> None:
+def _attach_lean(proof: Proof, spec: Claim, report: SearchReport, out_dir) -> None:
     """Generate + kernel-check a Lean certificate, if the spec provides one.
 
     Only a clean, axiom-free `lean` run upgrades verified_by. Any failure
@@ -104,6 +113,8 @@ def _attach_lean(proof: Proof, spec: ProblemSpec, report: SearchReport, out_dir)
         path = Path(out_dir) / "certificate.lean"
         path.write_text(source)
         proof.lean_file = str(path)
+    # Registry hooks emit this source through closed generators. The statement
+    # may still need review, but the model did not supply an executable file.
     result = lean_check.check_source(source, workdir=out_dir)
     proof.lean_report = result
     if result["ok"] and result["axiom_clean"]:
@@ -117,7 +128,6 @@ def _margin_polynomial(spec) -> tuple | None:
     symbolic form here, so its margin cannot be turned into a polynomial.
     """
     from .core import expr
-    from .core.space import spaces_for
 
     measure = getattr(spec, "measure", None)
     if not isinstance(measure, dict) or measure.get("kind") != "expr":
@@ -125,7 +135,7 @@ def _margin_polynomial(spec) -> tuple | None:
     if getattr(spec, "recipe", None):
         return None
     try:
-        shapes = {n: tuple(s.shape) for n, s in spaces_for(spec).items()}
+        shapes = {n: tuple(s.shape) for n, s in spec.spaces.items()}
         env = expr.symbol_env(shapes)
         poly = expr.evaluate(expr.parse(measure["margin"]), env, exact=True)
         # the claim's hypotheses, as polynomials assumed >= 0
@@ -138,7 +148,7 @@ def _margin_polynomial(spec) -> tuple | None:
     return poly, sorted(used, key=lambda s: s.name), assumptions
 
 
-def _attach_sos_lean(proof: Proof, spec: ProblemSpec, cert: dict, out_dir) -> None:
+def _attach_sos_lean(proof: Proof, spec: Claim, cert: dict, out_dir) -> None:
     """Generate + kernel-check the sum-of-squares certificate.
 
     A direct proof is DEDUCTIVE, so the kernel's rule applies with no
@@ -168,7 +178,7 @@ def _attach_sos_lean(proof: Proof, spec: ProblemSpec, cert: dict, out_dir) -> No
 
 
 def sos_proof(
-    spec: ProblemSpec, report: SearchReport | None = None, out_dir=None,
+    spec: Claim, report: SearchReport | None = None, out_dir=None,
     spec_trusted: bool = False, notes: list | None = None,
 ) -> Proof | None:
     """Prove a universal claim outright with a sum-of-squares certificate.
@@ -242,7 +252,7 @@ def sos_proof(
 
 
 def cases_proof(
-    spec: ProblemSpec, var: str, index: int, at, out_dir=None,
+    spec: Claim, var: str, index: int, at, out_dir=None,
     spec_trusted: bool = False, notes: list | None = None,
 ) -> Proof | None:
     """Prove a claim by splitting its domain in two and certifying each half.
@@ -325,7 +335,7 @@ def cases_proof(
 
 
 def induction_proof(
-    spec: ProblemSpec, out_dir=None, spec_trusted: bool = False,
+    spec: Claim, out_dir=None, spec_trusted: bool = False,
     notes: list | None = None,
 ) -> Proof | None:
     """Prove an UNBOUNDED claim over the naturals by monotone induction.
@@ -401,14 +411,14 @@ def induction_proof(
 
 
 def mechanized_proof(
-    spec: ProblemSpec, report: SearchReport, out_dir=None, spec_trusted: bool = False
+    spec: Claim, report: SearchReport, out_dir=None, spec_trusted: bool = False
 ) -> Proof | None:
     """Build a Proof from a search/enumeration report — or refuse.
 
     Returns None whenever the report does not meet the kernel's bar
     (uncertified numeric findings and sampling evidence are not proofs).
-    `spec_trusted` marks a bundled/reviewed spec; otherwise the Lean
-    statement is spec-controlled and flagged for human review.
+    `spec_trusted` marks a bundled/reviewed Claim; otherwise the Lean
+    statement is input-controlled and flagged for human review.
     """
     review = "bundled-trusted" if spec_trusted else "spec-generated-review-needed"
     proof: Proof | None = None
@@ -458,7 +468,7 @@ def mechanized_proof(
 
 
 def deductive_proof(
-    spec: ProblemSpec,
+    spec: Claim,
     method: Method | str,
     argument: str,
     lean_code: str | None,
@@ -484,7 +494,7 @@ def deductive_proof(
             path = Path(out_dir) / "proof_attempt.lean"
             path.write_text(lean_code)
             proof.lean_file = str(path)
-        result = lean_check.check_source(lean_code, workdir=out_dir)
+        result = lean_check.check_untrusted_source(lean_code, workdir=out_dir)
         proof.lean_report = result
         if result["ok"] and result["axiom_clean"]:
             proof.verified_by = "lean"

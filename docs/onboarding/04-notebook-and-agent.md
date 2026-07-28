@@ -61,7 +61,7 @@ Cells then stream in, one per recorded reasoning step.
 | **approach** (amber box) | The agent's declared line of attack: one of the ten proof methods plus its idea. Re-declared when it changes strategy. This is *intent*, and the final verdict shows declared against established |
 | **thinking** and **says** | The model's narrative before it acted |
 | **act** | The tool it chose: `look()`, `set_var(...)`, `hunt(...)`, `certify()` |
-| **the picture** | For `look` steps, the exact image the agent saw. Otherwise the scene after the act. Click it to open an interactive 3D view: drag to orbit, scroll to zoom, Esc to close |
+| **the picture** | The scene rendered for the human notebook after the act. In an image-channel run, tool pictures are also sent to the model. Click it to open an interactive 3D view: drag to orbit, scroll to zoom, Esc to close |
 | **equations** | The harness's symbolic translation of that state |
 | **diff** | Which points moved, as `- before` and `+ after`, plus the margin change |
 | **badge** | HOLDS or FAILS, with the margin |

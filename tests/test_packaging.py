@@ -63,6 +63,22 @@ def test_the_console_script_runs_outside_the_checkout(tmp_path):
     assert "circumcenter-in-triangle" in proc.stdout
 
 
+def test_start_script_is_tracked_executable():
+    """A local chmod can hide a non-executable Git entry on one machine."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    entry = subprocess.run(
+        ["git", "ls-files", "-s", "start.sh"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert entry.startswith("100755 "), entry
+    subprocess.run(["bash", "-n", "start.sh"], cwd=root, check=True)
+
+
 def test_declared_dependencies_cover_what_is_imported():
     """A dependency used but not declared installs fine here and breaks for
     everyone else."""

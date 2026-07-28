@@ -1,7 +1,7 @@
 """Scene graph: the shared visual language between the sandbox and renderers.
 
-A scene is a list of primitive dicts. Spec `build_scene` code creates them via
-the constructors below; both the matplotlib renderer and the generated Manim
+A scene is a list of primitive dicts. Closed Claim scene builders create them
+through the constructors below; both matplotlib and generated Manim
 scene consume the same JSON, so a witness found by the search renders
 identically everywhere. 2D inputs are lifted to z = 0.
 """

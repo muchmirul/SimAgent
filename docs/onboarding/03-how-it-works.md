@@ -170,7 +170,7 @@ rewritten at each stage, and each rewriting buys exactly one thing.
 | Floating point, numpy | Sampling and annealing | Speed. A float can only ever *propose* a candidate, which is why search on its own proves nothing |
 | Exact fractions, sympy | `certify` | A verdict that does not depend on floating point. This is the `sandbox` rung |
 | Integer pairs, Lean | The certificate | A verdict that does not depend on this codebase at all. This is the `sandbox+lean` rung |
-| The scene graph | Every picture | Perception. matplotlib, Manim and the browser read the same JSON, so the shape you click is the shape the agent saw |
+| The scene graph | Every picture | Perception. matplotlib, Manim and the browser read the same JSON, so the human views one kernel state. An image-channel run also sends tool pictures from that state to the model |
 
 There is a fifth form, and it is for reading only. `equation_of_state()` in
 [`core/journal.py`](../../src/simagent/core/journal.py) turns the current state

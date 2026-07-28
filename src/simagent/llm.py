@@ -2,8 +2,8 @@
 
 Since P5 the model composes from a CLOSED VOCABULARY — spaces, constructor
 recipe, and registry keys — instead of emitting Python code strings (decision
-D3: typed ops are safer and easier for the model than free code; the exec
-path is deprecated). The output is validated against the sandbox
+D3: typed ops are safer and easier for the model than free code; executable
+problem files are refused). The output is validated against the sandbox
 (`validate_claim`); failures are fed back for repair. Structured output keeps
 the schema exact.
 
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .core.claim import (
     CERTIFIERS,
@@ -30,6 +30,7 @@ from .core.claim import (
     LEANS,
     MEASURES,
     SCENES,
+    CLAIM_ID_PATTERN,
     Claim,
     validate_claim,
 )
@@ -68,7 +69,7 @@ class KindParamsModel(BaseModel):
 
 class ClaimModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    id: str
+    id: str = Field(pattern=CLAIM_ID_PATTERN, max_length=80)
     title: str
     conjecture: str
     latex: str

@@ -22,7 +22,7 @@ PORT="${PORT:-8642}"
 PROBLEM="${PROBLEM:-}"
 THINKING="${THINKING:-max}"
 TURNS="${TURNS:-40}"
-MODEL="${MODEL:-}"   # empty means: let pi route its first authenticated vision model
+MODEL="${MODEL:-}"   # empty means: let pi route its first authenticated model
 
 if [ ! -x .venv/bin/simagent ]; then
   echo "no .venv here. Install first:" >&2
@@ -64,7 +64,7 @@ done
 
 echo "SimAgent notebook: $URL"
 echo "problem=${PROBLEM:-yours to pick in the dropdown}  thinking=$THINKING  turns=$TURNS"
-echo "model=${MODEL:-first authenticated vision model}"
+echo "model=${MODEL:-first authenticated model}"
 echo "Ctrl-C stops the server."
 xdg-open "$URL" >/dev/null 2>&1 || true
 

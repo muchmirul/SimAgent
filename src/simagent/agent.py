@@ -15,9 +15,9 @@ import numpy as np
 
 from . import answer as answer_mod
 from . import proof as proof_mod
-from .proof import Method
+from .proof import Method, verification_rank
 from .search import SearchReport
-from .spec import ProblemSpec
+from .core.claim import Claim
 from .core.journal import Journal
 from .visualize import mpl
 from .web.session import SandboxSession
@@ -26,10 +26,6 @@ MAX_TOOL_CHARS = 2000
 MAX_RECALL_CHARS = 6000  # the memory tool carries a whole run, not one act
 RECALL_ACTS = 40  # most recent acts quoted in full; the rest are counted, not hidden
 COORD_PLACES = 6  # enough to re-issue a move exactly inside a unit-scale box
-
-# keep-best ordering for deductive attempts; mirrors proof.py's ladder so a
-# later failed attempt can never clobber a verified one
-_VERIFIED_RANK = {"sandbox+lean": 3, "lean": 2, "sandbox": 1, "none": 0}
 
 # Fields a truncated result must never drop: they carry the verdict or the
 # reason, which is the whole informational content of the reply.
@@ -399,7 +395,7 @@ TOOLS = [
 ]
 
 
-def _task_prompt(spec: ProblemSpec) -> str:
+def _task_prompt(spec: Claim) -> str:
     return (
         f"Conjecture: {spec.conjecture}\n\nLaTeX: {spec.latex}\n"
         f"Quantifier: {spec.quantifier}. Domain: "
@@ -411,7 +407,7 @@ def _task_prompt(spec: ProblemSpec) -> str:
     )
 
 
-def _report_from_certify(spec: ProblemSpec, session: SandboxSession, c: dict) -> SearchReport | None:
+def _report_from_certify(spec: Claim, session: SandboxSession, c: dict) -> SearchReport | None:
     """Promote an interactive certified configuration to kernel proof material."""
     if not c.get("certified"):
         return None
@@ -441,21 +437,21 @@ def _report_from_certify(spec: ProblemSpec, session: SandboxSession, c: dict) ->
 class AgentRun:
     """Provider-free tool state behind the pi transport. Cannot stamp verdicts."""
 
-    def __init__(self, spec: ProblemSpec, out_dir, *, images: bool = False,
+    def __init__(self, spec: Claim, out_dir, *, images: bool = False,
                  seed: int = 0):
-        self.spec = spec
         # Numbers-first: the model's senses are text and coordinates. Renders
         # are always written for the human notebook; ``images`` decides only
         # whether they are ALSO put into the model's context, so evaluation can
         # compare the two channels on the same kernel.
         self.images = bool(images)
         self.out = Path(out_dir)
-        self.out.mkdir(parents=True, exist_ok=True)
+        self.seed = int(seed)
+        # SandboxSession validates before it creates this directory.
+        self.session = SandboxSession(spec, self.out, seed=self.seed)
+        self.spec = self.session.spec
         (self.out / "looks").mkdir(exist_ok=True)
         (self.out / "views").mkdir(exist_ok=True)
         (self.out / "imagined").mkdir(exist_ok=True)
-        self.seed = int(seed)
-        self.session = SandboxSession(spec, self.out, seed=self.seed)
         self.looks = 0
         self.seq = 0
         self.declared_plans: list[dict] = []  # narrative intent, never the verdict
@@ -767,11 +763,10 @@ class AgentRun:
         return _fit(r)
 
     def _keep_best_deductive(self, attempt) -> None:
-        """Never let a later failed attempt clobber a verified one."""
-        rank = _VERIFIED_RANK
-        if self.deductive is None or rank.get(attempt.verified_by, 0) >= rank.get(
-            self.deductive.verified_by, 0
-        ):
+        """Never let a later weaker attempt clobber a stronger one."""
+        if self.deductive is None or verification_rank(
+            attempt.verified_by
+        ) >= verification_rank(self.deductive.verified_by):
             self.deductive = attempt
 
     def _t_sum_of_squares(self):

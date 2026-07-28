@@ -48,5 +48,3 @@ CLAIM = Claim(
         "answer states this explicitly."
     ),
 )
-
-SPEC = CLAIM

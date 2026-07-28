@@ -18,9 +18,9 @@ from pathlib import Path
 
 from . import answer as answer_mod
 from . import rounds as rounds_mod
+from .core.claim import Claim, require_valid_claim
 from .library import all_specs, get
 from .pipeline import run_problem
-from .spec import ProblemSpec
 
 
 def _cmd_list(_args) -> int:
@@ -66,7 +66,7 @@ def _cmd_eval(args) -> int:
     return 0
 
 
-def _resolve_spec(args) -> ProblemSpec:
+def _resolve_spec(args) -> Claim:
     return _resolve_with_intake(args)[0]
 
 
@@ -80,13 +80,12 @@ def _resolve_with_intake(args):
     from .llm import FormalizeError as FormalizeErr, FormalizeRefused
 
     if args.spec:
-        spec = ProblemSpec.load(args.spec)
+        spec = Claim.load(args.spec)
         return spec, intake_mod.record(spec, str(args.spec), "spec-file")
     if args.problem:
-        spec = get(args.problem)
+        spec = require_valid_claim(get(args.problem))
         return spec, intake_mod.record(spec, args.problem, "bundled")
     if args.conjecture:
-        from .core.claim import Claim
         from .llm import formalize_recorded
 
         # Approving names ONE claim by hash. Re-formalizing here would produce
@@ -96,7 +95,7 @@ def _resolve_with_intake(args):
         approved = getattr(args, "approve_claim", None)
         pending = intake_mod.load_pending(approved) if approved else None
         if pending is not None:
-            return Claim.from_json(pending.claim_json), pending
+            return require_valid_claim(Claim.from_json(pending.claim_json)), pending
 
         try:
             made = formalize_recorded(
@@ -121,8 +120,9 @@ def _resolve_with_intake(args):
                 f"nearby one.\n  Reason: {refused.reason}\n"
                 f"  Refused by: {refused.formalizer or 'unrecorded model'}"
             ) from refused
-        return made.claim, intake_mod.record(
-            made.claim, made.source_text, "conjecture", formalizer=made.formalizer,
+        claim = require_valid_claim(made.claim)
+        return claim, intake_mod.record(
+            claim, made.source_text, "conjecture", formalizer=made.formalizer,
         )
     raise SystemExit("give a bundled problem id, --spec spec.json, or --conjecture 'text' (see `simagent list`)")
 
@@ -165,9 +165,9 @@ def _cmd_play(args) -> int:
     from .play import launch
 
     if args.spec:
-        spec = ProblemSpec.load(args.spec)
+        spec = Claim.load(args.spec)
     elif args.problem:
-        spec = get(args.problem)
+        spec = require_valid_claim(get(args.problem))
     else:
         raise SystemExit("give a bundled problem id or --spec spec.json (see `simagent list`)")
     launch(spec, args.out or str(Path("runs") / f"play-{spec.id}"))

@@ -9,7 +9,7 @@ import pytest
 
 from simagent.core.claim import Claim, validate_claim
 from simagent.core.derive import CONSTRUCTORS
-from simagent.core.space import GraphSpace, spaces_for
+from simagent.core.space import GraphSpace
 from simagent.library import get
 from simagent.search import exhaustible, run_exhaustive
 
@@ -62,7 +62,7 @@ def test_graph_space_survives_the_domain_round_trip(tmp_path):
     """spec.domain rebuilds Spaces from name/shape/kind, so a graph that comes
     back as a plain integer box would silently lose its symmetry."""
     claim = get("graph-triangle-threshold")
-    assert isinstance(spaces_for(claim)["G"], GraphSpace)
+    assert isinstance(claim.spaces["G"], GraphSpace)
     path = tmp_path / "c.json"
     claim.save(path)
     again = Claim.load(path)

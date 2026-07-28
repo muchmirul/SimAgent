@@ -13,7 +13,7 @@ CORE = Path(__file__).parent.parent / "src" / "simagent" / "core"
 ALLOWED_ABSOLUTE = (
     "numpy", "sympy", "itertools", "dataclasses", "math", "abc", "typing",
     "json", "time", "pathlib", "fractions", "collections", "enum", "hashlib",
-    "copy", "ast", "__future__",
+    "copy", "ast", "re", "__future__",
 )
 ALLOWED_RELATIVE_L2 = ("sandbox", "sandbox.certify", "sandbox.geometry", "sandbox.scene")
 FORBIDDEN_MARKERS = ("web", "llm", "visualize", "agent", "matplotlib", "fastapi", "anthropic")

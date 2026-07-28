@@ -1,8 +1,15 @@
 import pytest
 
-from simagent import lean_check
+from types import SimpleNamespace
+
+from simagent import explain, lean_check
 from simagent.library import get
-from simagent.proof import Method, deductive_proof, mechanized_proof
+from simagent.proof import (
+    Method,
+    deductive_proof,
+    mechanized_proof,
+    verification_rank,
+)
 from simagent.search import case_count, exhaustible, run_exhaustive, run_search
 
 lean = pytest.mark.skipif(not lean_check.lean_available(), reason="no Lean toolchain")
@@ -47,6 +54,38 @@ def test_evidence_is_not_a_proof(tmp_path):
     report = run_search(spec, trials=60, seed=0)
     assert report.verdict == "no_counterexample"
     assert mechanized_proof(spec, report, out_dir=tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("method", "stamp", "verdict", "expected", "not_expected"),
+    [
+        ("counterexample", "sandbox", "counterexample", "violates", "satisfies"),
+        ("construction", "sandbox", "witness", "satisfies", "violation"),
+        ("exhaustion", "sandbox", "holds_on_domain", "every valid case", "witness"),
+        ("direct", "sandbox+lean", "no_counterexample", "deductive certificate", "witness"),
+        ("cases", "sandbox+lean", "no_counterexample", "both certified cases", "witness"),
+        ("induction", "sandbox+lean", "no_counterexample", "base case and step", "witness"),
+    ],
+)
+def test_result_summary_names_what_the_method_actually_checked(
+    method, stamp, verdict, expected, not_expected
+):
+    summary = explain.result_summary(
+        {"method": method, "verified_by": stamp}, {"verdict": verdict}
+    ).lower()
+    assert expected in summary
+    assert not_expected not in summary
+
+
+def test_sandbox_outranks_untrusted_lean_and_exists_margin_is_not_a_forall_claim():
+    assert verification_rank("sandbox+lean") > verification_rank("sandbox")
+    assert verification_rank("sandbox") > verification_rank("lean")
+    rows = explain.result_rows(
+        SimpleNamespace(quantifier="exists"), None, None, {"margin": -1.0}
+    )
+    margin = next(row for row in rows if row["label"] == "Margin")
+    assert "does not settle" in margin["why"]
+    assert "for all" not in margin["why"]
 
 
 def test_deductive_attempt_without_lean_is_unverified(tmp_path):

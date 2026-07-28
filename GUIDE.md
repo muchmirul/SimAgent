@@ -99,9 +99,10 @@ The agent's senses and hands, beyond looking and moving points:
 
 ## 3. Run an agent on a bundled problem
 
-1. Under **pi model**, pick any model in the dropdown. It lists only the
-   vision-capable models pi has authenticated for you, so anything there works.
-   Whichever you pick is written into the run's `runtime.json`, because a
+1. Under **pi model**, pick any authenticated model in the dropdown. Text-only
+   models are normal for the default numbers-first run. A vision model is
+   needed only when the image channel is enabled. Whichever you pick is written
+   into the run's `runtime.json`, because a
    transcript without a model name cannot be compared with another run.
 2. Under **thinking**, select **max**. Maximum thinking is slower and can use
    more account quota.
@@ -117,8 +118,9 @@ The agent's senses and hands, beyond looking and moving points:
      strategy. This is intent; the end verdict shows *declared vs established*.
    - **thinking** (dim italic) and **says**: the model's narrative before the act
    - **act**: the tool it chose, `look()`, `set_var(…)`, `hunt(…)`, `certify()` …
-   - the **picture**: for `look` steps, the exact image the agent saw;
-     otherwise the scene after the act. **Click any picture** to open it as an
+   - the **picture**: the scene rendered for the human notebook after the act.
+     When the image channel is enabled, tool pictures are also sent to the
+     model. **Click any picture** to open it as an
      interactive 3D view (drag to orbit, scroll to zoom, Esc to close).
    - the **equations** the harness wrote down for that state (amber box)
    - a **diff**: which points moved (`- before` / `+ after`) and the margin change

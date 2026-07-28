@@ -47,5 +47,3 @@ CLAIM = Claim(
         "(Thales). Any obtuse triangle is a counterexample."
     ),
 )
-
-SPEC = CLAIM  # historical alias; claims are spec-like

@@ -36,8 +36,8 @@ from typing import Any, TextIO
 import numpy as np
 
 from .agent import AgentRun, SYSTEM, TOOLS, _task_prompt, system_prompt
+from .core.claim import Claim
 from .library import get as get_bundled
-from .spec import ProblemSpec
 
 JOURNAL_FILE = "kernel-journal.jsonl"
 JOURNAL_VERSION = 4  # 4 adds adopt events: a finished world re-opened for a later run
@@ -279,7 +279,7 @@ class KernelTransport:
 
     def __init__(
         self,
-        spec: ProblemSpec,
+        spec: Claim,
         out_dir: str | Path,
         *,
         replay_journal: str | Path | None = None,
@@ -722,10 +722,10 @@ class KernelTransport:
         return result
 
 
-def _load_spec(problem_id: str | None, spec_path: str | None) -> ProblemSpec:
+def _load_spec(problem_id: str | None, spec_path: str | None) -> Claim:
     if bool(problem_id) == bool(spec_path):
         raise ValueError("provide exactly one of --problem-id or --spec")
-    return get_bundled(problem_id) if problem_id else ProblemSpec.load(spec_path)
+    return get_bundled(problem_id) if problem_id else Claim.load(spec_path)
 
 
 def serve(transport: KernelTransport, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:
@@ -790,7 +790,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SimAgent kernel JSONL transport")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--problem-id", help="bundled problem id")
-    source.add_argument("--spec", help="path to a ProblemSpec JSON file")
+    source.add_argument("--spec", help="path to a claim/1 JSON file")
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--replay-journal")
     parser.add_argument("--replay-through", type=int)

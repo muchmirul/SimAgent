@@ -53,5 +53,3 @@ CLAIM = Claim(
         "unit disc centred at (1,1). Worst case (1,1) with margin -1."
     ),
 )
-
-SPEC = CLAIM

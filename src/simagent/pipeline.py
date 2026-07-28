@@ -16,15 +16,15 @@ import numpy as np
 
 from . import answer as answer_mod
 from . import proof as proof_mod
+from .core.claim import Claim, require_valid_claim
 from .core.space import sample_vars
 from .search import SearchReport, exhaustible, run_exhaustive, run_search
-from .spec import ProblemSpec, validate_spec
 from .visualize import manim_gen, mpl
 
 
 @dataclass
 class PipelineResult:
-    spec: ProblemSpec
+    spec: Claim
     report: SearchReport
     out_dir: str
     artifacts: dict[str, str]
@@ -32,7 +32,7 @@ class PipelineResult:
     log: list[str] = field(default_factory=list)
 
 
-def _witness_or_sample(spec: ProblemSpec, report: SearchReport, seed: int) -> dict:
+def _witness_or_sample(spec: Claim, report: SearchReport, seed: int) -> dict:
     comp = spec.compiled()
     if report.witness:
         return {k: np.array(v, dtype=float) for k, v in report.witness.items()}
@@ -48,7 +48,7 @@ def _witness_or_sample(spec: ProblemSpec, report: SearchReport, seed: int) -> di
 
 
 def run_problem(
-    spec: ProblemSpec,
+    spec: Claim,
     out_dir,
     trials: int = 2000,
     seed: int = 0,
@@ -56,15 +56,15 @@ def run_problem(
     llm_proof: bool = False,
     llm_model: str | None = None,
 ) -> PipelineResult:
+    # Validate before creating the run directory. A malformed Claim is not a
+    # warning: executing any part of it would answer an unapproved question.
+    require_valid_claim(spec)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     log: list[str] = []
     t0 = time.time()
 
     spec.save(out / "spec.json")
-    problems = validate_spec(spec)
-    if problems:
-        log.append(f"spec validation warnings: {problems}")
 
     if exhaustible(spec):
         log.append(f"finite domain: checking every case (proof by exhaustion, {spec.quantifier})")

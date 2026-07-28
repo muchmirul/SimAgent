@@ -7,7 +7,7 @@ import pytest
 
 from simagent.agent import AgentRun
 from simagent.library import get
-from simagent.trace import TRACE_FILE, diff_vars, equation_of_state, read_trace
+from simagent.core.journal import TRACE_FILE, diff_vars, equation_of_state, read_trace
 
 
 def read_steps(out_dir):

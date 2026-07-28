@@ -3,9 +3,8 @@
 A Space is where a free entity's value lives. It is the ONLY module on the
 input side that knows what "d dimensions" means: sampling, validity,
 perturbation (the annealer's move), exact rational snapping, and finite
-enumeration all live here. v1 ships exactly two concrete spaces — `Box`
-(uniform box in ℝ^shape) and `IntBox` (integer grid in ℤ^shape) — mirroring
-the historical VarSpec semantics bit for bit:
+enumeration all live here. `Box` is a uniform real box and `IntBox` is a finite
+integer grid:
 
 - `Box.sample`     == rng.uniform(low, high, size=shape)
 - `IntBox.sample`  == rng.integers(low, high+1, size=shape).astype(float)
@@ -144,16 +143,6 @@ class IntBox(Space):
     @property
     def int_exact(self) -> bool:
         return abs(int(self.low)) <= SAFE_INT_BOUND and abs(int(self.high)) <= SAFE_INT_BOUND
-
-
-def from_varspec(v) -> Space:
-    """Adapter from the historical VarSpec (name/shape/low/high/kind)."""
-    shape = tuple(v.shape)
-    if v.kind in ("graph", "graph_iso"):
-        return GraphSpace(n=int(shape[0]), up_to_iso=v.kind == "graph_iso")
-    if v.kind == "int":
-        return IntBox(shape=shape, low=int(v.low), high=int(v.high))
-    return Box(shape=shape, low=float(v.low), high=float(v.high))
 
 
 # enumeration is deterministic and reused by count()/exhaust(); computing it
@@ -308,20 +297,15 @@ class GraphSpace(Space):
         return True
 
 
-def spaces_for(spec) -> dict[str, Space]:
-    """All of a spec's free-variable spaces, keyed by name (domain order)."""
-    return {v.name: from_varspec(v) for v in spec.domain}
-
-
-def sample_vars(rng: np.random.Generator, spec) -> dict[str, np.ndarray]:
+def sample_vars(rng: np.random.Generator, claim) -> dict[str, np.ndarray]:
     """The one authoritative domain sampler (search, play, web, CLI).
 
     Lives at the input boundary — the only place that knows what sampling
     means. Keeps the historical per-var error message."""
     out: dict[str, np.ndarray] = {}
-    for v in spec.domain:
+    for name, space in claim.spaces.items():
         try:
-            out[v.name] = from_varspec(v).sample(rng)
+            out[name] = space.sample(rng)
         except ValueError as e:
-            raise ValueError(f"{v.name}: {e}") from None
+            raise ValueError(f"{name}: {e}") from None
     return out

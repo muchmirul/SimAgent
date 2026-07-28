@@ -43,5 +43,3 @@ CLAIM = Claim(
         "sampling."
     ),
 )
-
-SPEC = CLAIM

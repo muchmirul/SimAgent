@@ -37,6 +37,11 @@ abbrev qposden (a : Q) : Prop := 0 < a.2
 """
 
 
+def _comment_text(value) -> str:
+    """Text safe inside one Lean block comment."""
+    return str(value).replace("/-", "/ -").replace("-/", "- /")
+
+
 def _q(x) -> str:
     x = sp.Rational(x)
     assert x.q > 0
@@ -91,7 +96,7 @@ def lean_simplex_circumcenter(T: sp.Matrix, theorem: str, title: str) -> str:
     if not w[k] < 0:
         raise ValueError("instance is not a counterexample: all barycentric coords >= 0")
 
-    lines = [PRELUDE, f"/- {title} -/", ""]
+    lines = [PRELUDE, f"/- {_comment_text(title)} -/", ""]
     atoms: list[str] = []
 
     def atom(name: str, value) -> str:
@@ -170,7 +175,7 @@ def lean_expr_sign(
             f"Lean term too large ({size} nodes > {EXPR_TERM_CAP}); "
             "sandbox verdict (exact rational arithmetic) stands"
         )
-    lines = [PRELUDE, f"/- {title} -/", ""]
+    lines = [PRELUDE, f"/- {_comment_text(title)} -/", ""]
     for name in sorted(atoms):
         lines.append(f"def {name} : Q := {_q(atoms[name])}")
     lines += ["", f"def margin : Q := {_render_q(term)}", ""]
@@ -326,7 +331,7 @@ def lean_sos(cert: dict, theorem: str, title: str,
         )
 
     lines = [SOS_PRELUDE_V2] if prelude else []
-    lines += [f"/- {title} -/", ""]
+    lines += [f"/- {_comment_text(title)} -/", ""]
     if namespace:
         lines.append(f"namespace {namespace}")
         lines.append("")
@@ -364,8 +369,8 @@ def lean_sos_cases(certs: list[dict], theorem: str, title: str,
     That the cases COVER the domain is the modeling step and is stated here
     in prose, exactly like the positive-denominator argument above; the
     arithmetic of each case is checked."""
-    header = [SOS_PRELUDE_V2, f"/- {title}", ""]
-    header += [f"   case {i}: {note}" for i, note in enumerate(case_notes)]
+    header = [SOS_PRELUDE_V2, f"/- {_comment_text(title)}", ""]
+    header += [f"   case {i}: {_comment_text(note)}" for i, note in enumerate(case_notes)]
     header += ["", "   The cases above cover the claim's domain; each is certified"
                    " separately below. -/", ""]
     parts = ["\n".join(header)]
@@ -385,7 +390,7 @@ def lean_bounded_nat(theorem: str, title: str, defs: str, statement: str) -> str
     return "\n".join(
         [
             "/- SimAgent certificate — Lean 4 core only; checked by `decide` (no axioms).",
-            f"   {title} -/",
+            f"   {_comment_text(title)} -/",
             "",
             "set_option maxRecDepth 8000",
             "",
@@ -481,7 +486,7 @@ def lean_recipe_witness(atoms: dict, pins: list[str], nondegenerate: list[list[s
     word for the numbers. `nondegenerate` is an edge matrix whose determinant
     must be nonzero, which is what makes the construction unique.
     """
-    lines = [PRELUDE, f"/- {title}", "",
+    lines = [PRELUDE, f"/- {_comment_text(title)}", "",
              "   Each derived quantity is PINNED by the equations that define it,",
              "   so the kernel checks the construction and not merely the numbers.",
              "   The edge determinant is nonzero, so that construction is unique. -/",

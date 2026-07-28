@@ -46,5 +46,3 @@ CLAIM = Claim(
         "hypothesis is declared and used."
     ),
 )
-
-SPEC = CLAIM

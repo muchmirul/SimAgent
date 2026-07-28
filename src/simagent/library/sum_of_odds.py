@@ -46,5 +46,3 @@ CLAIM = Claim(
         "case in the declared domain."
     ),
 )
-
-SPEC = CLAIM

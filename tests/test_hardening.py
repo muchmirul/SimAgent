@@ -5,7 +5,8 @@ reopens the hole fails loudly. (P5 note: bundled problems are now immutable
 native Claims, so the bad-domain cases are constructed directly instead of
 mutating a bundled object — the invariants under test are unchanged.)
 """
-from types import SimpleNamespace
+import ast
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -14,7 +15,9 @@ from simagent import lean_check
 from simagent.library import get, is_bundled
 from simagent.core.journal import read_trace
 from simagent.kernel_transport import KernelTransport
-from simagent.core.claim import Claim
+from simagent.core.claim import Claim, ClaimValidationError, validate_claim
+from simagent.core.space import IntBox, sample_vars
+from simagent.pipeline import run_problem
 from simagent.proof import Method, mechanized_proof
 from simagent.search import (
     case_count,
@@ -22,24 +25,28 @@ from simagent.search import (
     int_domain_exact,
     run_exhaustive,
 )
-from simagent.spec import ProblemSpec, VarSpec, sample_vars, validate_spec
+from simagent.visualize.manim_gen import write_manim_scene
 
 lean = pytest.mark.skipif(not lean_check.lean_available(), reason="no Lean toolchain")
 
 
-def _int_domain_spec(low, high, shape=()):
-    """Minimal spec-like with an integer domain (duck-typed for the samplers)."""
-    return SimpleNamespace(
+def _int_domain_claim(low, high, shape=(), margin="1"):
+    return Claim(
         id="bad-int-domain",
+        title="integer boundary test",
+        conjecture="test the declared integer domain",
+        latex=r"\forall n",
         quantifier="forall",
-        domain=[SimpleNamespace(name="n", shape=list(shape), low=low, high=high, kind="int")],
+        spaces={"n": IntBox(shape=tuple(shape), low=low, high=high)},
+        measure={"kind": "expr", "margin": margin},
+        scene={"kind": "point", "of": "n"},
     )
 
 
 # ---- exhaustion soundness -------------------------------------------------
 
 def test_case_count_rejects_inverted_and_empty_domains():
-    bad = _int_domain_spec(low=200, high=0)  # inverted
+    bad = _int_domain_claim(low=200, high=0)  # inverted
     assert case_count(bad) == 0
     assert not exhaustible(bad)
     with pytest.raises(ValueError):
@@ -47,7 +54,7 @@ def test_case_count_rejects_inverted_and_empty_domains():
 
 
 def test_case_count_no_int64_overflow_on_huge_shapes():
-    huge = _int_domain_spec(low=0, high=200, shape=[1000000])
+    huge = _int_domain_claim(low=0, high=200, shape=[1000000])
     # python-int arithmetic -> astronomically large but correct, not 1
     assert case_count(huge) > 10**100
     assert not exhaustible(huge)
@@ -56,22 +63,15 @@ def test_case_count_no_int64_overflow_on_huge_shapes():
 def test_int_domain_exact_guard():
     spec = get("sum-of-odds-square")
     assert int_domain_exact(spec)
-    unsafe = _int_domain_spec(low=0, high=2**50)  # beyond the 2^40 safe bound
+    unsafe = _int_domain_claim(low=0, high=2**50)  # beyond the 2^40 safe bound
     assert not int_domain_exact(unsafe)
 
 
 def test_exhaustion_hit_without_certifier_is_not_certified_when_unsafe():
-    # A forall over an int domain that FAILS somewhere, with no certify_code and
-    # inputs beyond the exact-int guard -> found, but NOT stamped certified.
-    spec = ProblemSpec(
+    # A forall over an unsafe integer range fails, but has no exact certifier.
+    spec = replace(
+        _int_domain_claim(low=2**50, high=2**50 + 3, margin="-1"),
         id="unsafe-int-forall",
-        title="unsafe",
-        conjecture="n < 0 for all n (false)",
-        latex=r"\forall n,\ n < 0",
-        quantifier="forall",
-        domain=[VarSpec(name="n", shape=[], low=2**50, high=2**50 + 3, kind="int")],
-        check_code="def check(n):\n    return {'holds': float(n) < 0, 'margin': None, 'data': {}}",
-        scene_code="def build_scene(n):\n    return [scene_label(str(n))]",
     )
     report = run_exhaustive(spec)
     assert report.verdict == "counterexample"
@@ -80,21 +80,21 @@ def test_exhaustion_hit_without_certifier_is_not_certified_when_unsafe():
 
 
 def test_exhaustion_incomplete_when_check_raises():
-    spec = ProblemSpec(
-        id="raises-forall",
-        title="raises",
-        conjecture="always true",
-        latex=r"\forall n",
-        quantifier="forall",
-        domain=[VarSpec(name="n", shape=[], low=0, high=5, kind="int")],
-        check_code=(
-            "def check(n):\n"
-            "    if int(n) == 3:\n"
-            "        raise RuntimeError('boom')\n"
-            "    return {'holds': True, 'margin': None, 'data': {}}"
-        ),
-        scene_code="def build_scene(n):\n    return [scene_label(str(n))]",
-    )
+    spec = replace(_int_domain_claim(low=0, high=5), id="raises-forall")
+    native = spec.compiled()
+
+    class RaisingEngine:
+        has_certify = native.has_certify
+
+        def valid(self, **values):
+            return native.valid(**values)
+
+        def check(self, **values):
+            if int(values["n"]) == 3:
+                raise RuntimeError("boom")
+            return native.check(**values)
+
+    spec.compiled = lambda: RaisingEngine()
     report = run_exhaustive(spec)
     # a case we could not decide means the forall is NOT proved
     assert report.verdict == "no_counterexample"
@@ -121,25 +121,21 @@ def test_statement_review_flags_non_bundled_specs():
     assert untrusted_proof.statement_review == "spec-generated-review-needed"
 
 
-# ---- spec validation ------------------------------------------------------
-
-def _legacy_int_spec(**var_kw):
-    return ProblemSpec(
-        id="legacy-int", title="t", conjecture="c", latex="l", quantifier="forall",
-        domain=[VarSpec(name="n", shape=[], **var_kw)],
-        check_code="def check(n):\n    return {'holds': True, 'margin': None, 'data': {}}",
-        scene_code="def build_scene(n):\n    return [scene_label(str(n))]",
-    )
-
+# ---- Claim validation -----------------------------------------------------
 
 def test_validate_rejects_bad_kind_and_bounds():
-    assert any("kind" in e for e in validate_spec(_legacy_int_spec(low=0, high=5, kind="integer")))
-    assert any("<=" in e for e in validate_spec(_legacy_int_spec(low=5, high=0, kind="int")))
+    data = get("positive-quadratic").to_json()
+    data["spaces"][0]["kind"] = "integer"
+    with pytest.raises(ValueError, match="unknown kind"):
+        Claim.from_json(data)
+    assert any("<=" in error for error in validate_claim(
+        _int_domain_claim(low=5, high=0)
+    ))
 
 
 def test_sample_vars_friendly_error_on_inverted_int():
     with pytest.raises(ValueError, match="low"):
-        sample_vars(np.random.default_rng(0), _int_domain_spec(low=5, high=0))
+        sample_vars(np.random.default_rng(0), _int_domain_claim(low=5, high=0))
 
 
 # ---- steering honesty -----------------------------------------------------
@@ -175,7 +171,69 @@ def test_user_comment_cannot_change_verdict_state(tmp_path):
         transport.finalize()
 
 
+# ---- generated-code and input-boundary hardening --------------------------
+
+@lean
+def test_model_lean_cannot_write_a_host_file(tmp_path):
+    escaped = tmp_path / "lean-escaped.txt"
+    source = (
+        f'#eval IO.FS.writeFile {str(escaped)!r} "escaped"\n'
+        "theorem audit_true : True := by decide\n"
+        "#print axioms audit_true\n"
+    )
+    result = lean_check.check_untrusted_source(source, workdir=tmp_path)
+    assert result["ok"] is False
+    assert not escaped.exists()
+    assert "unsafe" in result["output"].lower()
+
+
+def test_claim_id_cannot_inject_manim_or_escape_run_paths(tmp_path):
+    base = get("positive-quadratic")
+    for bad_id in ("../../outside", '"""\\nHACKED = True\\n"""', "", "two words"):
+        assert any("id" in error for error in validate_claim(replace(base, id=bad_id)))
+
+    scene = [{
+        "type": "points", "coords": [[0.0, 0.0, 0.0]],
+        "color": "#000000", "radius": 0.1, "name": "p",
+    }]
+    path = tmp_path / "scene.py"
+    write_manim_scene(scene, 'title " quoted', '"""\nHACKED = True\n"""', path)
+    tree = ast.parse(path.read_text())
+    assigned = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "HACKED" not in assigned
+
+
+def test_pipeline_rejects_invalid_claim_before_writing(tmp_path):
+    bad = replace(get("positive-quadratic"), quantifier="bogus")
+    out = tmp_path / "invalid-run"
+    with pytest.raises(ClaimValidationError, match="quantifier"):
+        run_problem(bad, out, trials=2)
+    assert not out.exists()
+
+
 # ---- lean_check hardening -------------------------------------------------
+
+@lean
+def test_untrusted_lean_never_falls_back_without_isolation(monkeypatch, tmp_path):
+    real_which = lean_check.shutil.which
+    monkeypatch.setattr(
+        lean_check.shutil,
+        "which",
+        lambda name: None if name == "bwrap" else real_which(name),
+    )
+    result = lean_check.check_untrusted_source(
+        "theorem safe : True := by decide\n#print axioms safe\n",
+        workdir=tmp_path,
+    )
+    assert result["ok"] is False and result["isolated"] is False
+    assert "bubblewrap" in result["output"]
+
 
 @lean
 def test_lean_rejects_forbidden_constructs():

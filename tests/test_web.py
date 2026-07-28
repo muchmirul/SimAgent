@@ -1,8 +1,11 @@
+import json
+
 import numpy as np
 import pytest
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
+from simagent.library import get  # noqa: E402
 from simagent.web import create_app  # noqa: E402
 
 
@@ -25,6 +28,16 @@ def test_problems_and_static(client):
 
 def test_state_requires_load(client):
     assert client.get("/api/state").status_code == 409
+
+
+def test_load_rejects_an_invalid_claim_as_input(client, tmp_path):
+    data = get("positive-quadratic").to_json()
+    data["quantifier"] = "bogus"
+    path = tmp_path / "bad-claim.json"
+    path.write_text(json.dumps(data))
+    response = client.post("/api/load", json={"spec_path": str(path)})
+    assert response.status_code == 422
+    assert "quantifier" in response.text
 
 
 def test_load_set_and_check(client):

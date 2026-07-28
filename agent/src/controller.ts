@@ -171,7 +171,7 @@ export class RunController {
     return this.modelRuntime;
   }
 
-  private async resolveModel(provider?: string, modelId?: string): Promise<{
+  private async resolveModel(provider?: string, modelId?: string, images = false): Promise<{
     modelRuntime?: ModelRuntime;
     model?: Model<any>;
   }> {
@@ -194,8 +194,11 @@ export class RunController {
         `pi model not found or not authenticated: ${provider ?? "*"}/${modelId ?? "*"}`,
       );
     }
-    if (!model.input.includes("image")) {
-      throw new ControllerError("VALIDATION", `${model.provider}/${model.id} has no image input`);
+    if (images && !model.input.includes("image")) {
+      throw new ControllerError(
+        "VALIDATION",
+        `${model.provider}/${model.id} has no image input; turn images off or choose a vision model`,
+      );
     }
     return { modelRuntime: runtime, model };
   }
@@ -296,7 +299,11 @@ export class RunController {
       const name = this.allocate(base);
       const outDir = resolve(this.runsRoot, name);
       await mkdir(this.runsRoot, { recursive: true });
-      const selected = await this.resolveModel(request.provider, request.model);
+      const selected = await this.resolveModel(
+        request.provider,
+        request.model,
+        request.images === true,
+      );
       const runtimeOptions: CreateSimAgentRuntimeOptions = {
         outDir,
         cwd: this.cwd,

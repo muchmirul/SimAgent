@@ -6,9 +6,6 @@ from pathlib import Path
 import numpy as np
 
 from simagent.core.journal import Journal, read_trace, replay_vars
-from simagent.core.claim import claim_from_spec
-from simagent.library import get
-from simagent.search import run_search
 
 
 def entry(j, tool, vars, margin, **kw):
@@ -74,14 +71,3 @@ def test_pre_p3_trace_without_mode_reads_as_commit(tmp_path):
     assert out["done"] and out["total"] == 1
     tip = replay_vars(out["steps"])
     assert tip["T"].shape == (3, 2)
-
-
-def test_claim_adapter_runs_identically_to_its_spec():
-    spec = get("circumcenter-in-triangle")
-    claim = claim_from_spec(spec)
-    assert claim.to_speclike() is spec  # legacy engine: literally the same object
-    assert set(claim.spaces) == {"T"}
-    a = run_search(claim.to_speclike(), trials=200, seed=5)
-    b = run_search(spec, trials=200, seed=5)
-    assert a.verdict == b.verdict == "counterexample"
-    assert a.witness == b.witness

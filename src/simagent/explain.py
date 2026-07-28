@@ -34,9 +34,11 @@ STAMP_WORDS = {
 VERDICT_WORDS = {
     "counterexample": "the claim is FALSE, and here is the case that breaks it",
     "witness": "the claim is TRUE for at least one case, and here it is",
-    "no_counterexample": "no case broke it. That is evidence, never a proof",
-    "exhausted": "every case in a finite domain was checked",
-    "incomplete": "the search could not finish, so nothing is settled",
+    "no_counterexample": "no sampled case broke it. That is evidence, never a proof",
+    "no_witness": "no sampled case satisfied it. That is evidence, never a disproof",
+    "holds_on_domain": "every valid case in the declared finite domain satisfied it",
+    "no_witness_on_domain": "every valid case was checked and none satisfied it",
+    "incomplete": "the complete check could not finish, so nothing is settled",
 }
 
 
@@ -129,38 +131,89 @@ def result_rows(spec, proof, report, final_check: dict | None = None) -> list[di
         margin = (_get(report, "witness_check") or {}).get("margin")
     if margin is not None:
         holds = float(margin) > 0
-        rows.append({
-            "label": "Margin",
-            "value": _num(margin),
-            "why": ("positive, so the property HOLDS here" if holds
-                    else "not positive, so the property FAILS here — and one "
-                         "failing case is all a `for all` claim can survive"),
-        })
+        quantifier = _get(spec, "quantifier")
+        if holds and quantifier == "exists":
+            why = "positive, so this case satisfies the existence claim"
+        elif holds and quantifier == "forall":
+            why = "positive, so the property HOLDS here; one case does not prove all cases"
+        elif not holds and quantifier == "exists":
+            why = "not positive, so this case fails; one failed case does not settle existence"
+        elif not holds and quantifier == "forall":
+            why = "not positive, so this case breaks the `for all` claim"
+        else:
+            why = "positive, so the property HOLDS here" if holds else (
+                "not positive, so the property FAILS here"
+            )
+        rows.append({"label": "Margin", "value": _num(margin), "why": why})
     return rows
 
 
 def result_summary(proof, report) -> str:
-    """One paragraph: is this an answer, or is it evidence?"""
+    """One paragraph: what was checked, and is it an answer or evidence?"""
     stamp = _get(proof, "verified_by")
+    method = _get(proof, "method")
+    method = getattr(method, "value", method)
     verdict = _get(report, "verdict")
+    lean = " Lean also accepted the generated certificate with no axioms." if (
+        stamp == "sandbox+lean"
+    ) else ""
+
     if stamp in ("sandbox", "sandbox+lean"):
-        lean = " and re-proved by the Lean kernel with no axioms" if stamp == "sandbox+lean" else ""
+        if method == "counterexample":
+            return (
+                "This is a checkable answer, not evidence. An exact rational witness "
+                "violates the universal claim, so one case settles it as false." + lean
+            )
+        if method == "construction":
+            return (
+                "This is a checkable answer, not evidence. An exact rational witness "
+                "satisfies the existence claim, so one case settles it as true." + lean
+            )
+        if method == "exhaustion":
+            outcome = (
+                "every valid case satisfies the claim"
+                if verdict == "holds_on_domain"
+                else "every valid case was checked and no witness exists"
+            )
+            return (
+                "This is a checkable answer on the declared finite domain, not "
+                f"evidence. Complete enumeration established that {outcome}." + lean
+            )
+        if method == "direct":
+            return (
+                "This is a deductive answer, not search evidence. A strict "
+                "sum-of-squares deductive certificate proves the margin positive "
+                "throughout the declared domain." + lean
+            )
+        if method == "cases":
+            return (
+                "This is a deductive answer, not search evidence. Both certified "
+                "cases cover the declared domain and establish the claim." + lean
+            )
+        if method == "induction":
+            return (
+                "This is a deductive answer, not bounded evidence. The certified "
+                "base case and step establish the claim for every declared natural "
+                "number." + lean
+            )
         return (
-            "This is a real, checkable answer, not evidence. The witness is written "
-            f"in exact fractions and the violation was re-decided in exact rational arithmetic{lean}, "
-            "so nothing here rests on floating point."
+            "This is a checkable mechanical answer, not sampling evidence." + lean
         )
     if stamp == "lean":
         return (
-            "The Lean kernel accepted the proof, so the arithmetic is settled. What is "
-            "not settled is whether the Lean statement says what you meant: that still "
-            "needs a human to read it."
+            "The Lean kernel accepted the proof. The deduction is checked, but whether "
+            "the model-written Lean statement matches the conjecture still needs human "
+            "review."
         )
     if verdict == "no_counterexample":
         return (
-            "Nothing was proved. The search looked and did not find a counterexample, "
-            "which is evidence the claim may be true and nothing more. Proving a `for "
-            "all` over a continuous domain needs a certificate, not a search."
+            "Nothing was proved. Sampling found no counterexample, which is evidence "
+            "the claim may be true and nothing more."
+        )
+    if verdict == "no_witness":
+        return (
+            "Nothing was disproved. Sampling found no witness, which is evidence "
+            "against existence and nothing more."
         )
     return (
         "Nothing reached a kernel-grade result. Whatever was said above is narrative, "

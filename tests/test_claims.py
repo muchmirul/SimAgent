@@ -1,4 +1,4 @@
-"""P5 gates: native claims (zero exec'd code on the bundled path), the
+"""Native Claim gates: problem loading has no executable-code path, the
 dimension-agnostic known answer (d=4 certified counterexample with the
 explicit no-Lean-above-d3 notice), construct/expect tools, and the
 closed-vocabulary formalizer schema."""
@@ -15,14 +15,13 @@ from simagent.llm import ClaimModel, claim_from_model_dump
 from simagent.pipeline import run_problem
 from simagent.proof import Method
 from simagent.search import run_search
-from simagent.spec import ProblemSpec
 
 
 def test_bundled_library_is_exec_free_native_claims():
     claims = all_specs()
     assert len(claims) == 11
     for c in claims:
-        assert isinstance(c, Claim) and c.is_native, c.id
+        assert isinstance(c, Claim), c.id
         assert validate_claim(c) == [], c.id
         # spec-like surface used by search/proof/answer
         assert c.domain and c.quantifier in ("forall", "exists")
@@ -75,10 +74,35 @@ def test_claim_json_roundtrip_and_untrusted_identity(tmp_path):
     claim = get("circumcenter-in-tetrahedron")
     path = tmp_path / "claim.json"
     claim.save(path)
-    loaded = ProblemSpec.load(path)  # routes claim/1 to Claim.from_json
+    loaded = Claim.load(path)
     assert isinstance(loaded, Claim) and loaded.id == claim.id
     assert not is_bundled(loaded)  # disk twin is a different object -> untrusted
     assert validate_claim(loaded) == []
+
+
+def test_problem_loading_has_no_exec_or_legacy_module():
+    import ast
+    from pathlib import Path
+
+    package = Path(__file__).resolve().parents[1] / "src" / "simagent"
+    assert not (package / "spec.py").exists()
+    offenders = []
+    for path in package.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in {"exec", "eval"}:
+                    offenders.append(f"{path.relative_to(package)}:{node.lineno}")
+    assert offenders == []
+
+
+def test_legacy_executable_spec_is_refused(tmp_path):
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps({
+        "id": "legacy", "check_code": "raise RuntimeError('must not run')"
+    }))
+    with pytest.raises(ValueError, match="executable legacy specs are refused"):
+        Claim.load(path)
 
 
 def test_construct_renders_and_follows_ancestors(tmp_path):

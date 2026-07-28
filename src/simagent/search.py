@@ -15,9 +15,9 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
-from .core.space import sample_vars, spaces_for
+from .core.claim import Claim, NativeCheckResult, NativeEngine
+from .core.space import sample_vars
 from .sandbox import certify as certify_mod
-from .spec import CheckResult, CompiledSpec, ProblemSpec
 
 
 @dataclass
@@ -39,7 +39,7 @@ class SearchReport:
         return asdict(self)
 
 
-def _safe_check(comp: CompiledSpec, vars: dict) -> CheckResult | None:
+def _safe_check(comp: NativeEngine, vars: dict) -> NativeCheckResult | None:
     try:
         if not comp.valid(**vars):
             return None
@@ -49,17 +49,17 @@ def _safe_check(comp: CompiledSpec, vars: dict) -> CheckResult | None:
 
 
 def _refine(
-    comp: CompiledSpec,
-    spec: ProblemSpec,
+    comp: NativeEngine,
+    spec: Claim,
     start: dict[str, np.ndarray],
     rng: np.random.Generator,
     minimize: bool,
     steps: int = 500,
     sigma0: float = 0.15,
     goal: float = 0.08,
-) -> tuple[dict[str, np.ndarray], CheckResult, int]:
+) -> tuple[dict[str, np.ndarray], NativeCheckResult, int]:
     """Hill-climb the margin (down for counterexamples, up for witnesses)."""
-    spaces = spaces_for(spec)  # the annealing move is Space.perturb (input boundary)
+    spaces = spec.spaces  # the annealing move is Space.perturb (input boundary)
     cur = {k: np.array(v, dtype=float) for k, v in start.items()}
     cur_res = _safe_check(comp, cur)
     assert cur_res is not None and cur_res.margin is not None
@@ -82,7 +82,7 @@ def _refine(
 
 
 def _try_certify(
-    comp: CompiledSpec, spec: ProblemSpec, vars: dict[str, np.ndarray], want_holds: bool
+    comp: NativeEngine, spec: Claim, vars: dict[str, np.ndarray], want_holds: bool
 ) -> tuple[bool | None, dict | None, dict[str, np.ndarray] | None, list[str]]:
     """Rationalize -> confirm numerically -> decide exactly.
 
@@ -90,7 +90,7 @@ def _try_certify(
     """
     notes: list[str] = []
     if not comp.has_certify:
-        notes.append("no certify_code on spec; result is numeric-only")
+        notes.append("no exact certifier on the Claim; result is numeric-only")
         return None, None, None, notes
     for max_den in (16, 64, 256, 1024):
         exact = {k: certify_mod.rationalize_array(v, max_den=max_den) for k, v in vars.items()}
@@ -120,13 +120,13 @@ def _try_certify(
 EXHAUSTION_CAP = 2_000_000
 
 
-def case_count(spec: ProblemSpec) -> int | None:
+def case_count(spec: Claim) -> int | None:
     """Total number of cases in the domain, or None if it is not finite.
 
     Returns 0 for an empty or inverted (low > high) integer range.
     """
     total = 1
-    for space in spaces_for(spec).values():
+    for space in spec.spaces.values():
         n = space.count()
         if n is None:
             return None
@@ -136,17 +136,17 @@ def case_count(spec: ProblemSpec) -> int | None:
     return total
 
 
-def int_domain_exact(spec: ProblemSpec) -> bool:
+def int_domain_exact(spec: Claim) -> bool:
     """True iff every integer input stays within the exact-float range."""
-    return all(space.int_exact for space in spaces_for(spec).values())
+    return all(space.int_exact for space in spec.spaces.values())
 
 
-def exhaustible(spec: ProblemSpec, cap: int = EXHAUSTION_CAP) -> bool:
+def exhaustible(spec: Claim, cap: int = EXHAUSTION_CAP) -> bool:
     n = case_count(spec)
     return n is not None and 0 < n <= cap
 
 
-def run_exhaustive(spec: ProblemSpec, cap: int = EXHAUSTION_CAP) -> SearchReport:
+def run_exhaustive(spec: Claim, cap: int = EXHAUSTION_CAP) -> SearchReport:
     """Check EVERY case of a finite integer domain — proof by exhaustion.
 
     Unlike run_search this is definitive (within the declared domain):
@@ -165,16 +165,16 @@ def run_exhaustive(spec: ProblemSpec, cap: int = EXHAUSTION_CAP) -> SearchReport
     hunting_violation = spec.quantifier == "forall"
     int_exact = int_domain_exact(spec)
     # Basis for calling the enumeration a proof: exact integer evaluation (safe
-    # bounds) OR a spec-provided exact certifier we can invoke per hit.
+    # bounds) OR a Claim-provided exact certifier we can invoke per hit.
     exact_note = (
         "float64 evaluation of integer-valued cases (exact: all inputs within "
         f"|x| <= 2^40, so integer arithmetic below 2^53 is exact)"
         if int_exact
         else "float64 evaluation (inputs exceed the exact-integer guard; "
-        "verdict is NOT certified unless certify_code re-decides it)"
+        "verdict is NOT certified unless an exact certifier re-decides it)"
     )
 
-    spaces = spaces_for(spec)
+    spaces = spec.spaces
 
     # A space that enumerates only up to symmetry covers the domain ONLY if the
     # claim cannot tell the symmetric copies apart. Spot-check it and refuse on
@@ -229,9 +229,9 @@ def run_exhaustive(spec: ProblemSpec, cap: int = EXHAUSTION_CAP) -> SearchReport
             if certified is None:
                 certified = int_exact
                 notes.append(
-                    "no certify_code; certified by integer-exact evaluation"
+                    "no exact certifier; certified by integer-exact evaluation"
                     if int_exact
-                    else "no certify_code and inputs exceed the exact-integer guard: NOT certified"
+                    else "no exact certifier and inputs exceed the exact-integer guard: NOT certified"
                 )
             return SearchReport(
                 verdict="counterexample" if hunting_violation else "witness",
@@ -300,12 +300,12 @@ def _int_repr(arr: np.ndarray) -> object:
 
 
 def refine_candidate(
-    spec: ProblemSpec,
+    spec: Claim,
     start_vars: dict[str, np.ndarray],
     steps: int = 500,
     minimize: bool | None = None,
     seed: int = 0,
-) -> tuple[dict[str, np.ndarray], CheckResult, int]:
+) -> tuple[dict[str, np.ndarray], NativeCheckResult, int]:
     """Public annealing entry point (used by interactive play).
 
     Pushes the margin down for forall specs (toward a counterexample) or up
@@ -318,14 +318,14 @@ def refine_candidate(
     if res is None:
         raise ValueError("starting configuration is invalid or degenerate")
     if res.margin is None:
-        raise ValueError("this spec has a discrete check (no margin); refine unavailable")
+        raise ValueError("this Claim has a discrete check (no margin); refine unavailable")
     rng = np.random.default_rng(seed)
     return _refine(comp, spec, start_vars, rng, minimize=minimize, steps=steps)
 
 
 def certify_candidate(
-    spec: ProblemSpec, vars: dict[str, np.ndarray]
-) -> tuple[CheckResult, bool | None, dict | None, list[str]]:
+    spec: Claim, vars: dict[str, np.ndarray]
+) -> tuple[NativeCheckResult, bool | None, dict | None, list[str]]:
     """Exact-arithmetic verdict for one configuration (used by interactive play).
 
     Returns (numeric check, certified, exact witness repr, notes) where
@@ -340,7 +340,7 @@ def certify_candidate(
 
 
 def run_search(
-    spec: ProblemSpec,
+    spec: Claim,
     trials: int = 2000,
     seed: int = 0,
     refine: bool = True,
@@ -350,9 +350,9 @@ def run_search(
     hunting_violation = spec.quantifier == "forall"
 
     best_vars: dict | None = None
-    best_res: CheckResult | None = None
+    best_res: NativeCheckResult | None = None
     found_vars: dict | None = None
-    found_res: CheckResult | None = None
+    found_res: NativeCheckResult | None = None
     valid = 0
     m_min: float | None = None
     m_max: float | None = None

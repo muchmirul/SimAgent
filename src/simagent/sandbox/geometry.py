@@ -1,4 +1,4 @@
-"""Numeric geometry toolbox available to ProblemSpec code.
+"""Numeric geometry used by the closed Claim vocabulary.
 
 Every function here is exposed to the exec'd `check` / `build_scene` code of a
 spec (see spec.toolbox()). Keep signatures simple and array-based: this module

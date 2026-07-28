@@ -2,11 +2,11 @@
 
 The search runs in floating point. Before we claim "counterexample", the
 candidate is snapped to rational coordinates and the property is re-decided
-with sympy exact arithmetic via a spec's `certify` code. A False from certify
+with sympy exact arithmetic through the Claim's closed certifier. A False from it
 on a rational instance is a genuine mathematical disproof of a universally
 quantified statement (and symmetrically, True certifies an existence witness).
 
-Helpers here are exposed to certify code; they operate on sympy Matrices of
+These helpers operate on sympy Matrices of
 Rationals mirroring the numeric toolbox in geometry.py.
 """
 from __future__ import annotations

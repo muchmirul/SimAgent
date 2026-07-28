@@ -36,5 +36,3 @@ CLAIM = Claim(
         "'no counterexample found' plus a proof obligation."
     ),
 )
-
-SPEC = CLAIM

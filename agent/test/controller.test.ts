@@ -121,6 +121,48 @@ describe.sequential("P6 run controller", () => {
     }
   }, 60_000);
 
+  it("accepts an explicit text-only model unless the image channel is on", async () => {
+    const root = await mkdtemp(join(tmpdir(), "simagent-controller-text-"));
+    const faux = fauxProvider({
+      provider: "simagent-controller-text-faux",
+      models: [{ id: "text-only", input: ["text"] }],
+    });
+    const modelRuntime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
+    });
+    modelRuntime.registerNativeProvider(faux.provider);
+    const controller = new RunController({ runsRoot: root, modelRuntime });
+    try {
+      faux.setResponses([
+        fauxAssistantMessage(
+          fauxToolCall("finish", { summary: "numbers were enough" }, { id: "text-finish" }),
+          { stopReason: "toolUse" },
+        ),
+      ]);
+      const started = await controller.start({
+        problemId: "circumcenter-in-triangle",
+        provider: faux.provider.id,
+        model: "text-only",
+        images: false,
+      });
+      await waitTerminal(controller, started.run);
+      expect(controller.status(started.run).status).toBe("done");
+
+      await expect(
+        controller.start({
+          problemId: "circumcenter-in-triangle",
+          provider: faux.provider.id,
+          model: "text-only",
+          images: true,
+        }),
+      ).rejects.toThrow(/turn images off or choose a vision model/);
+    } finally {
+      await controller.shutdown();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("routes a structured one-shot question through pi, with no kernel and no vision", async () => {
     // Formalizing a conjecture is not an agent run, but it is still a model
     // turn, so it belongs to pi like everything else. A text-only model must be

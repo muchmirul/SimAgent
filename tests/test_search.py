@@ -1,11 +1,11 @@
+from simagent.core.claim import validate_claim
 from simagent.library import get
 from simagent.search import run_search
-from simagent.spec import validate_spec
 
 
 def test_bundled_specs_validate():
     for pid in ("circumcenter-in-triangle", "circumcenter-in-tetrahedron", "euler-characteristic-hull"):
-        assert validate_spec(get(pid)) == []
+        assert validate_claim(get(pid)) == []
 
 
 def test_triangle_counterexample_certified():

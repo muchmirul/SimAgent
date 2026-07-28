@@ -16,8 +16,9 @@ one distinguished measure. It is pure data. No code is stored and none is
 executed.
 
 **Spec.** The on-disk JSON form of a claim, written as `spec.json` in every run
-directory. `claim/1` is the current native format. The older exec-code format
-still loads through `spec.py`, which is deprecated.
+directory. `claim/1` is the only executable format. Older run traces remain
+readable, but their code-bearing problem files are refused because loading a
+math question must never execute code from that file.
 
 **Space.** The domain a free variable lives in, and the input boundary of the
 system. It knows how to sample, validate, perturb, produce exact values, and

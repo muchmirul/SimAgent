@@ -167,6 +167,7 @@ async function smoke(argv: string[]): Promise<number> {
     modelRuntime,
     model,
     thinkingLevel: "medium",
+    images: true,
   });
   runtime.session.subscribe((event) => {
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {

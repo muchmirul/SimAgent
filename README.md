@@ -124,9 +124,10 @@ text but the agent's **visual chain of thought**:
   chose (`set_var`, `hunt`, `certify`, …), the **picture** of the scene after
   the act, the harness's **equation translation** of that state, and a
   **diff** vs the previous step with the margin change.
-- For `look` steps the cell shows the *exact image the agent saw*. Click any
-  cell image to open that step as an **interactive 3D scene** (three.js,
-  orbit/zoom).
+- Each cell shows the scene rendered for the human notebook. In an `--images`
+  run, pictures returned by `look`, `view`, and `imagine` are also attached to
+  the model. Click any cell image to open that step as an **interactive 3D
+  scene** (three.js, orbit/zoom).
 - The final **verdict cell** is built only from kernel artifacts
   (`proof.json`, `answer.md`) — the model's prose never upgrades a claim.
 - The header dropdown replays any past run (CLI `simagent agent` runs
@@ -279,6 +280,11 @@ Certificates need only Lean *core* (no Mathlib, no lake project), so this one
 command is the entire setup; SimAgent finds `~/.elan/bin/lean` automatically
 (override with `SIMAGENT_LEAN`). Without a toolchain, verdicts stop at
 `sandbox` and say so.
+
+Lean files written by a model run only inside Linux `bubblewrap`, with no
+network and no writable host tree. If bubblewrap is absent or blocked, that
+attempt stays `verified_by: none` and reports the isolation failure. Generated
+certificates still use the closed core-only checker.
 
 ## Manim from the CLI
 

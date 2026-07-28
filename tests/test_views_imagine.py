@@ -141,8 +141,9 @@ def test_sweep_rejects_ndim3_and_labels_default_row(tmp_path):
     import numpy as _np
     from simagent.core.space import Box
     from types import SimpleNamespace
-    fake = SimpleNamespace(domain=[SimpleNamespace(name="X", shape=[2, 2, 2],
-                                                   low=-1.0, high=1.0, kind="real")])
+    fake = SimpleNamespace(spaces={
+        "X": Box(shape=(2, 2, 2), low=-1.0, high=1.0)
+    })
     with pytest.raises(ValueError, match="scalar/1-D/2-D"):
         render_sweep(fake, comp, {"X": _np.zeros((2, 2, 2))}, tmp_path / "s2.png", var="X")
 

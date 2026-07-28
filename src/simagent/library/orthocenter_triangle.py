@@ -62,5 +62,3 @@ CLAIM = Claim(
         "vertex)."
     ),
 )
-
-SPEC = CLAIM

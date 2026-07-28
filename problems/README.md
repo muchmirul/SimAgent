@@ -19,7 +19,7 @@ Copy `three-xy.json` and edit it. The fields that matter:
 
 | Field | What it is |
 |---|---|
-| `id` | Short name, used for the run folder |
+| `id` | Safe run-folder name: lowercase letters or digits joined by single hyphens, at most 80 characters |
 | `quantifier` | `forall` or `exists` |
 | `spaces` | The free variables. `shape: [2]` is a point in the plane, `[4, 3]` is four points in space |
 | `measure.margin` | The expression whose **sign decides the claim**: positive means the property holds |
