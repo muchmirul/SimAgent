@@ -218,3 +218,30 @@ def test_comment_injected_clean_phrase_does_not_fool_checker():
     )
     r = lean_check.check_source(src, workdir="/tmp")
     assert r["axiom_clean"] is False
+
+
+def test_no_shipped_source_points_at_one_machine():
+    """A path only one machine has is a bug that hides on that machine.
+
+    This is not hypothetical: a debugging probe writing to an absolute scratch
+    directory reached `explain.py` and shipped. It ran fine here, where the
+    directory existed, and made every CI job fail inside `finalize()` with a
+    FileNotFoundError far from its cause. The suite cannot see such a line
+    either, because the machine running the suite is usually the machine that
+    has the path, so the check has to be on the text.
+    """
+    import re
+    from pathlib import Path as _Path
+
+    repo = _Path(__file__).resolve().parents[1]
+    # Absolute roots that belong to a person's machine, not to a checkout.
+    machine = re.compile(r'["\'](/tmp/|/home/|/Users/|/mnt/|/var/folders/)')
+    offenders = []
+    for folder in ("src", "agent/src"):
+        for path in sorted((repo / folder).rglob("*")):
+            if path.suffix not in (".py", ".ts") or not path.is_file():
+                continue
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                if machine.search(line):
+                    offenders.append(f"{path.relative_to(repo)}:{number}: {line.strip()}")
+    assert not offenders, "shipped source names a path only one machine has:\n" + "\n".join(offenders)

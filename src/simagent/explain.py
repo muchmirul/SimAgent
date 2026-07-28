@@ -302,9 +302,6 @@ def handoff_markdown(spec, proof, report, digest, *, config, ending,
             "open as it was before this run."
         )
     else:
-        import os as _os_probe
-        with open("/tmp/claude-1000/-mnt-Tforce-dev-SimAgent/b5b7447d-9a4c-4118-b355-d44a9d3528e3/scratchpad/BRANCH_HIT.txt", "a") as _fh:
-            _fh.write(f"HIT stamp={stamp} pid={_os_probe.getpid()} test={_os_probe.environ.get('PYTEST_CURRENT_TEST','?')}\n")
         out.append(
             f"A `{stamp}` result is on record; {STAMP_WORDS.get(stamp, 'see ARCHITECTURE.md')}."
         )
