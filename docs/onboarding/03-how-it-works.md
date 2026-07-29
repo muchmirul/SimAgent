@@ -55,8 +55,17 @@ codebase:
 > **margin > 0 means the property holds. margin < 0 means it fails.**
 
 Because it is continuous, search has a gradient to follow. For a `forall` claim
-the search *minimizes* the margin, hunting for a counterexample. For an `exists`
-claim it *maximizes*, hunting for a witness. The zero level of that number is
+the search *minimizes* the margin. For an `exists` claim it *maximizes*.
+
+Minimizing is not a hunt for a counterexample specifically. For a `forall`
+claim the *minimum* of the margin is the quantity that decides it: negative
+means a counterexample exists, positive means the claim holds everywhere. So
+downhill is the direction of the answer either way. What search hands back is
+the smallest margin it has SEEN, which settles the question when that value is
+negative and settles nothing when it is positive, and closing that gap to the
+true minimum is what a certificate does in step 4.
+
+The zero level of that number is
 the boundary of the theorem, which is why the `field` view is more than
 decoration: painting the margin over a slice of configuration space and drawing
 its zero contour shows you the shape of the theorem. For the triangle claim,
@@ -91,6 +100,14 @@ allowed to write a `verified_by` stamp. It knows ten classical proof methods.
 The split is the point. The harness can mechanize three of the ten. For the
 other seven it grades nothing. An argument in prose, however good, is recorded
 as `verified_by: none` until the Lean kernel accepts it.
+
+One honest caveat about how those instruments feel to use. Working toward a
+counterexample, the model gets a margin number back after every move, so each
+move informs the next. Working toward a proof, it gets accepted or refused plus
+one sentence of reason, and no number telling it how close the attempt came.
+Refuting is a progression; proving is a cliff. That is a gap in the instruments,
+not in the mathematics, and it is written up in ARCHITECTURE.md under "Refuting
+and proving are one motion with unequal instruments".
 
 One family of proofs is worth knowing, because search alone can never reach it.
 Search can refute a `forall`, by finding one bad case, but it can never establish

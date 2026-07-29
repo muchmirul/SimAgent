@@ -118,6 +118,16 @@ stood 60 and fell to one finite point set; the Hirsch conjecture stood 53 and
 fell to one polytope. That is this machine's shape, and discrete and extremal
 geometry is where such questions are still open.
 
+**"Settles" cuts both ways, and the aim is not refutation.** A sum-of-squares
+certificate is an explicit finite object too: a short list of squares in exact
+rationals that a reader checks by hand in ten seconds, with no Lean and no trust
+in this code. `positive-quadratic` is settled that way, in the positive
+direction, by the same kind of object. Those three famous counterexamples are
+cited because they show the SIZE of what one finite object can decide, not
+because disproof is the goal. Where the two directions are currently unequal is
+in the instruments, not in the aim: see "Refuting and proving are one motion
+with unequal instruments" under the proof kernel.
+
 Olympiad inequalities are the benchmark that earns credibility, not the
 destination.
 
@@ -246,6 +256,38 @@ Every answer names one of the ten classical proof methods and carries a
 
 Sampling evidence ("no counterexample in N trials") is **never** a proof and
 `mechanized_proof` returns `None` for it, deliberately.
+
+### Refuting and proving are one motion with unequal instruments
+
+For a `∀` claim the deciding quantity is the **minimum** of the margin over the
+domain: negative means a counterexample exists, positive means the claim holds.
+So `search.py` walking downhill is not a refutation move. It is the move that
+looks for that minimum, and it serves both answers. What search actually
+returns is the smallest margin it has SEEN, which settles the claim when that
+value is negative and settles nothing when it is positive. Closing the gap
+between the seen minimum and the true minimum is exactly the job of a
+certificate.
+
+The mathematics is symmetric. The instruments are not:
+
+| direction | what the model can act with | what comes back |
+|---|---|---|
+| toward a counterexample | sample, set_var, nudge, refine, hunt, exhaust, construct | a margin number after every single move, so the next move is informed by the last |
+| toward a proof | sum_of_squares, prove_by_cases, prove_by_induction, submit_lean_proof | accepted or refused, plus one sentence of reason ("the margin has odd total degree", "no positive-semidefinite solution was found") |
+
+Refuting is therefore a progression the model can act inside, while proving is a
+cliff it either clears or does not. A refused certificate names WHY it failed,
+which the model needs, but carries no quantity saying how near it came, so a
+second attempt starts from the same place as the first.
+
+**This is an instrument gap, not a property of the mathematics, and not the
+intended shape of the harness.** It is why the machine reads as a counterexample
+machine even though the bundled set is six false claims and five true ones, and
+four of those five reach `sandbox+lean` (three by SOS, one by exhaustion). The
+proving side works. What it lacks is the step-by-step feedback the refuting side
+has, which is a different problem. The harness owes capability and
+perception in both directions; today it pays them unevenly. Widening the proving
+side into a progression is open work, ranked in list.md.
 
 ## Lean certificates (`sandbox/leangen.py`, `lean_check.py`)
 

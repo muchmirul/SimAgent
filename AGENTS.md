@@ -133,6 +133,20 @@ Each module is described once, here. State it nowhere else.
   the naturals: base case positive, step case margin(n+1) - margin(n) a sum of
   squares). Every such proof still bottoms out in a kernel-accepted
   certificate, so all three are Lean-or-nothing.
+  Refuting and proving are ONE motion: for a `forall` the deciding quantity is
+  the MINIMUM of the margin, so search walking downhill serves both answers, and
+  what it returns is only the smallest margin SEEN (a certificate is what closes
+  the gap to the true minimum). The instruments are unequal, though. The
+  counterexample side answers every single move with a number the model can walk;
+  the proving side answers accepted-or-refused plus one sentence of reason, with
+  no quantity saying how near the attempt came, so a second attempt starts where
+  the first did. That is an instrument gap to close, NOT the intended shape of
+  the harness, and it is why the machine reads as a counterexample machine even
+  though the bundled set is six false claims and five true ones, four of which
+  reach `sandbox+lean`. The proving side WORKS; what it lacks is step-by-step
+  feedback. See
+  ARCHITECTURE.md "Refuting and proving are one motion with unequal instruments"
+  and list.md item 3.
 - `lean_check.py` + `sandbox/leangen.py` — generated Lean 4 *core*
   certificates (`by decide`, rationals as integer pairs), checked with a bare
   `lean file.lean`. The toolchain IS installed (`~/.elan/bin/lean`, Lean

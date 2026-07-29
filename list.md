@@ -67,12 +67,15 @@ step crashing exposed it. Never point nsimplify at something already exact.
 |---|---|---|---|
 | 1 | **Find something new.** Point the harness at an open finite-dimensional conjecture. | Reproducing known counterexamples makes a demo; one new result makes a tool. This is the only measure the community will care about, and everything above exists to make it possible. | Model |
 | 2 | **More live sessions, on problems the model has not seen.** | One run is one data point, and it was on a bundled claim. The transcript is the only honest source of harness defects. Watch where it stalls; each stall with everything available is the model's limit, each stall for want of a tool is ours. | Harness (evaluation) |
-| 3 | **Pi's coding-agent framing leaks in.** The model's first thought in the live run was "starting initial codebase exploration". | It recovered immediately, so this is small, but it means the session begins pointed at the wrong task. | Harness |
-| 4 | **More Space types: permutations, subsets, lattices.** | GraphSpace proved the pattern works. Each new Space opens a class of objects a mathematician can finally state. Add on demand, not in advance. | Harness |
-| 5 | **Pins for the remaining constructors.** `incenter` and the line constructors have no Lean pinning equations, so claims using them stop at `sandbox`. | Correct today (it fails closed), but it caps the strongest verdict for part of the geometry kit. | Harness |
-| 6 | **The last four methods.** Contradiction, contrapositive, combinatorial, infinite descent have no instrument. | A model may declare a sound method and find the harness cannot help it execute. Lower priority than it looks: those four are harder to mechanize and rarer in this domain. | Harness |
+| 3 | **Proving is a cliff, refuting is a progression.** Toward a counterexample the model has sample, nudge, refine, hunt and exhaust, each answering with a margin number. Toward a proof it has `sum_of_squares` and friends: accepted or refused, plus one sentence, with no quantity saying how close the attempt came. | The harness owes capability and perception in BOTH directions and today pays them unevenly, which is why the machine reads as a counterexample machine. A second certificate attempt starts from the same place as the first, so the model cannot work its way toward a proof the way it works its way toward a witness. Scope it right: the proving side WORKS (four of the five true bundled claims reach `sandbox+lean`), so this is a missing feedback signal, not a broken verifier. Not a guess: known now, without waiting for 1 and 2. | Harness |
+| 4 | **Pi's coding-agent framing leaks in.** The model's first thought in the live run was "starting initial codebase exploration". | It recovered immediately, so this is small, but it means the session begins pointed at the wrong task. | Harness |
+| 5 | **More Space types: permutations, subsets, lattices.** | GraphSpace proved the pattern works. Each new Space opens a class of objects a mathematician can finally state. Add on demand, not in advance. | Harness |
+| 6 | **Pins for the remaining constructors.** `incenter` and the line constructors have no Lean pinning equations, so claims using them stop at `sandbox`. | Correct today (it fails closed), but it caps the strongest verdict for part of the geometry kit. | Harness |
+| 7 | **The last four methods.** Contradiction, contrapositive, combinatorial, infinite descent have no instrument. | A model may declare a sound method and find the harness cannot help it execute. Lower priority than it looks: those four are harder to mechanize and rarer in this domain. | Harness |
 
 ### Order
 
-**1 and 2 together**, then let what they reveal rank 3 to 6. Every remaining
-item is a guess until a model is watched failing on a problem that matters.
+**1 and 2 together**, then let what they reveal rank 4 to 7. Item 3 is the
+exception: it is the one gap already established rather than guessed, so it does
+not wait for a live session to justify it. Every other remaining item is a guess
+until a model is watched failing on a problem that matters.

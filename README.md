@@ -12,9 +12,10 @@ is a harness built on that idea:
 > **Input:** a conjecture.
 > **Middle:** an executable 3D sandbox simulation of the conjecture, visualized
 > (Manim + matplotlib), with an automated search playing in it.
-> **Output:** a mathematical answer — a certified counterexample, a witness, or
-> honest evidence — written up in LaTeX and sketched in Lean. Equations are the
-> *representation* of what happened in the sandbox, not the medium of work.
+> **Output:** a mathematical answer: a certified counterexample, a witness, a
+> kernel-checked proof, or honest evidence, written up in LaTeX and sketched in
+> Lean. Equations are the *representation* of what happened in the sandbox, not
+> the medium of work.
 
 SimAgent is a small, correctness-first **agent harness**, and the word harness
 is the whole design: **it answers nothing.** Every answer comes from the model
