@@ -164,16 +164,20 @@ not exist, and the honest next step is a WIDER evaluation manifest that finds
 a task the harness cannot serve, not a guess at which capability to add.
 
 The current closed vocabulary remains narrow. Natural-language formalization
-cannot emit `GraphSpace` even though the core supports it, most constructors
-lack Lean pins, graph claims lack a Lean hook, and certificates above dimension
-3 stop at `sandbox`.
+cannot emit `GraphSpace` even though the core supports it, graph claims lack a
+Lean hook, and certificates above dimension 3 stop at `sandbox`. Constructor
+pins are no longer the gap (14 of 19 as of 2026-07-29): what is left there is
+the three graph counts, `vertex`, and `incenter`, which is permanent.
 
 - [ ] Expose `graph` and `graph_iso` in the formalizer schema and prompt.
 - [ ] Add a known-answer formalization test for a graph Claim.
 - [ ] Rank missing Spaces from repeated evaluation failures.
 - [ ] Add permutation, subset, lattice, or polytope Spaces only when a current
       admitted problem needs one.
-- [ ] Add Lean pins for constructors that block real evaluated claims.
+- [x] Add Lean pins for constructors that block real evaluated claims. Done
+      2026-07-29 for the geometry kit: sub, dot, cross2, distance_sq, segment,
+      foot, reflect, intersect_lines, simplex_volume. What remains needs a NEW
+      encoding rather than another pin (graphs, and selecting a row by index).
 - [ ] Add a graph certificate hook when a graph result needs independent Lean
       checking.
 - [ ] Implement the documented LU-witness certificate shape when a result above

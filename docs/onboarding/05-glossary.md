@@ -87,8 +87,11 @@ must be strict, because proving `margin >= 0` does not settle a strict claim.
 
 **Pin.** The defining equations a certificate states for a derived entity, so
 the Lean kernel checks how a number was constructed instead of taking the
-harness's word for it. Without a pin, a recipe certificate is refused and the
-claim keeps its `sandbox` stamp.
+harness's word for it. A pin must make its construction UNIQUE, which is why
+the line pins also assert the line exists: if A and B coincided, "F is on line
+AB and perpendicular to it" would be true of every point, and the certificate
+would hold while establishing nothing. Without a pin, a recipe certificate is
+refused and the claim keeps its `sandbox` stamp.
 
 **Certificate.** The generated Lean file, `certificate.lean`. It restates the
 decisive arithmetic in Lean 4 core and is checked by the Lean kernel.

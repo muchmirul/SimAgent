@@ -142,7 +142,7 @@ flowchart TD
 
 | Hop | Carries | Format |
 |---|---|---|
-| browser → `web/app.py` | a problem id or free text, a comment, a branch point, a picked 3D point | HTTP JSON |
+| browser → `web/app.py` | a problem id or free text, a comment, a branch point, a picked 3D point, or the NAME of a run to continue | HTTP JSON |
 | `pi_agent.py` → `service.js` | run lifecycle and human moves | JSONL `{"id","op",…}` |
 | `service.js` → model | system prompt, task prompt, the 21 tool schemas | pi's provider adapter; SimAgent never sees a provider wire format |
 | model → `kernel_transport.py` | one tool call per turn | `{"op":"call","toolCallId","name","args"}` |
@@ -165,6 +165,14 @@ failure at either hop reads the same way:
 
 Kernel ops: `describe`, `call`, `userAction`, `note`, `runtime`, `annotate`,
 `snapshot`, `stop`, `finalize`. One request, one response, always.
+
+**Continuing travels the same start hop.** `{"adopt": RUN}` on
+`POST /api/agent/start` becomes a path on the service frame, then `--adopt` on
+the kernel spawn. The browser sends a run NAME, never a path: `run_dir()`
+resolves it inside the runs root and refuses anything that escapes, so the page
+cannot name a directory the server did not offer. The claim is rebuilt from that
+run's own `spec.json`, and naming a problem alongside it is a 422, because that
+could only name a different claim than the journal about to be replayed.
 
 Service ops: `start`, `status`, `events`, `comment`, `pause`, `resume`,
 `userAction`, `branch`, `stop`, `structured`, `models`.

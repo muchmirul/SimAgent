@@ -55,11 +55,15 @@ than hidden:
   `circumcenter-in-4simplex` is the bundled example.
 - **A recipe built from an unpinned constructor tops out at `sandbox`.** Lean
   takes only free variables as atoms, so the certificate must pin each
-  construction to its defining equations. Five constructors carry pins today:
-  `circumcenter`, `orthocenter`, `barycentric`, `centroid`, `midpoint`. Anything
-  else raises rather than accepting a weaker certificate.
-  `orthocenter-in-triangle` is the bundled example of a pinned recipe reaching
-  `sandbox+lean`.
+  construction to its defining equations. Fourteen of the nineteen constructors
+  carry pins today: `circumcenter`, `orthocenter`, `barycentric`, `centroid`,
+  `midpoint`, `sub`, `dot`, `cross2`, `distance_sq`, `segment`, `foot`,
+  `reflect`, `intersect_lines`, `simplex_volume`. The other five raise rather
+  than accept a weaker certificate, and each says why: `incenter` is weighted by
+  side lengths, which are square roots, so it is algebraic and never rational;
+  `vertex` picks a row by a value this encoding cannot select on; and the three
+  graph counts have no Lean encoding yet. `orthocenter-in-triangle` is the
+  bundled example of a pinned recipe reaching `sandbox+lean`.
 - **`GraphSpace` claims have no Lean hook yet.** `graph-triangle-threshold`
   produces a certified counterexample stamped `sandbox`.
 

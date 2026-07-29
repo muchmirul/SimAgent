@@ -136,6 +136,11 @@ text but the agent's **visual chain of thought**:
   (`proof.json`, `answer.md`) — the model's prose never upgrades a claim.
 - The header dropdown replays any past run (CLI `simagent agent` runs
   included), and follows a still-running one live.
+- **continue** carries a finished run on rather than starting over: its journal
+  is replayed into a new session, every state hash checked, and the world
+  re-opened. It is live only for a run that kept the journal and spec that
+  needs, and it takes no problem of its own, since the claim comes from the run
+  being continued.
 
 The server remains the kernel authority: the sandbox session API
 (`/api/load`, `/api/set`, `/api/hunt`, `/api/certify`, …) and Manim render
@@ -334,12 +339,14 @@ loop.
   approved by hash before any agent runs; a formalizer that cannot express your
   conjecture refuses rather than substituting a nearby one (`intake.json`)
 - `simagent play` — interactive sandbox REPL with a live-updating 3D preview
-- `simagent web` — reasoning notebook: problem in, the run's chain of thought out, with comment, branch, pause and direct point-moving (live)
+- `simagent web` — reasoning notebook: problem in, the run's chain of thought out, with comment, branch, pause, direct point-moving and continue (live)
 - `simagent agent` — an LLM acting in the world (numbers-first tools; `--images` adds pictures) through authenticated pi providers
 - Continuing a run — `--adopt RUN_DIR` replays a finished run's whole journal,
   hash-checked, and re-opens it; `--rounds N` loops that until a kernel stamp or
-  a budget declared before the run stops it. Every ending, including running out
-  of turns, now leaves `handoff.md` and `metrics.json`
+  a budget declared before the run stops it; in the notebook it is the
+  **continue** button, offered only for a run that kept what adopting needs.
+  Every ending, including running out of turns, leaves `handoff.md` and
+  `metrics.json`
 - Proof kernel: ten classical methods, `verified_by` trust ladder
 - Lean integration: generated core-Lean certificates (`decide`, axiom-free) for
   counterexample / construction / exhaustion; fail-closed checker

@@ -441,9 +441,19 @@ boundary that the move was not its own. The truth-making instruments
 as established is never the human's to assert either.
 
 The reasoning notebook polls the kernel trace and can also consume pi events
-through `/api/agent/<run>/stream`. A user can select a cell, thought, action,
-or equation line, or raycast-pick a 3D primitive, then comment or branch from
-that state. The verdict cell still reads only `proof.json` and `answer.md`.
+through the `/api/agent/<run>/stream` websocket. A user can select a cell,
+thought, action, or equation line, or raycast-pick a 3D primitive, then comment
+or branch from that state. The verdict cell still reads only `proof.json` and
+`answer.md`.
+
+A FINISHED run can also be continued from the page: `POST /api/agent/start`
+takes `{"adopt": RUN}`, which becomes `--adopt` on the kernel spawn. Two things
+make that safe to expose to a browser. The client sends a run NAME, resolved by
+`run_dir()` inside the runs root, so it cannot name a directory the server did
+not offer; and the claim is rebuilt from that run's own `spec.json`, so naming a
+problem beside it is refused rather than replaying a journal into a world some
+other claim describes. `/api/runs` reports `continuable` per run, because a
+control offered where it cannot work is worse than one not offered.
 
 ## Files
 
@@ -469,7 +479,9 @@ src/simagent/
   sandbox/       geometry.py (numeric, d-generic simplex math + hull_facets),
                  certify.py (sympy exact, any-ndim rationalization),
                  scene.py (scene graph), leangen.py (Lean certs; d<=3 cap
-                 stated explicitly — the LU-witness encoding is the extension),
+                 stated explicitly — the LU-witness encoding is the extension;
+                 RECIPE_PINS ties 14 of 19 constructors to their defining
+                 equations, UNPINNABLE says why the other five cannot be),
                  sos.py (exact rational sum-of-squares search: the engine
                  behind every DIRECT proof; incomplete, and every refusal
                  appends its reason to `notes`)
