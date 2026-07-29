@@ -134,6 +134,27 @@ the hash matches exactly.
 prefix, replays the kernel journal prefix, verifies the state hash, and records
 provenance.
 
+**Adopt.** Continue a run that already ENDED. `--adopt RUN_DIR` replays the whole
+earlier journal, hash checked like a branch, then writes an `adopt` event that
+re-opens the world, because replay alone would restore the ending too and the
+next model would be refused at its first move. A branch rewinds inside one run;
+adopt picks up a finished one.
+
+**Rounds.** `--rounds N` loops adopt: round k adopts round k-1. It stops on a
+kernel stamp, on a round that took no act of its own, or on the budget you
+declared, and never on the model's own sense of being finished.
+
+**Handoff.** `handoff.md`, what one run leaves the next: what was established,
+and every instrument that ran and established nothing, carrying that
+instrument's own reason. Written at every ending, including running out of
+turns, so a run killed by its budget no longer leaves an empty narrative.
+
+**Gap.** The proving side's margin. When a sum of squares attempt is refused,
+`progress.gap` says how far the closest candidate Gram matrix stood from being
+a sum of squares: about -1 far off, -3e-05 for a near miss, exactly 0 once the
+exact check accepts one. It is perception, never a verdict, and a claim that
+misses by a hair is still false.
+
 **pi.** The pinned TypeScript runtime under [`agent/`](../../agent/) that owns
 provider authentication, model turns, events, steering, and conversation
 sessions. It transports messages. It cannot stamp a verdict.

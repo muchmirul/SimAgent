@@ -6,7 +6,12 @@ Scope: **P0 only**; no P1 core migration was started.
 
 > Historical note: P6 has now landed. The pi runtime became the production
 > control plane, and the temporary Python API and Claude Code agent backends
-> described as fallbacks below were removed.
+> described as fallbacks below were removed. Every pi version and limitation
+> named below is the state of 0.81.1 on the date above; `agent/package.json`
+> holds the version actually pinned today. The commands are reproduced as they
+> were RUN that day, so some name provider and model ids that no longer exist:
+> do not copy them. Where this report disagrees with the code, the code is
+> right.
 
 ## Executive result
 

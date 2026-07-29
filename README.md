@@ -94,12 +94,15 @@ A run directory contains the whole story:
 ```
 runs/<id>-seed0/
   spec.json        the conjecture as a native claim (claim/1 JSON)
+  intake.json      the problem contract: your words, the claim hash, the review state
   report.json      search report (verdict, witness, margins, certification)
+  proof.json       the proof record, including the verified_by stamp
   scene.json       3D scene graph of the decisive configuration
   preview.png      matplotlib 3D render (always)
   scene_manim.py   self-contained Manim ThreeDScene (render any time)
   answer.md        readable verdict + witness + method
   answer.tex       classical LaTeX write-up
+  certificate.lean the generated Lean the kernel accepted (only when one was made)
   conjecture.lean  Lean 4 / Mathlib skeleton (flagged unchecked)
 ```
 
@@ -186,8 +189,8 @@ Lean check, and verdict. The model reads the world in exact numbers (`check`
 gives its coordinates, whether the claim holds, and the margin; `measure` gives
 the qualitative description) and acts only through the closed SimAgent tool
 set: `plan`, `measure`, `view`, `imagine`,
-`construct`, `expect`, movement/search tools, `certify`, Lean submission, and
-`finish`.
+`construct`, `expect`, movement/search tools, `certify`, Lean submission,
+`recall` (its own journal read back, since compaction is off) and `finish`.
 
 Install and authenticate pi once:
 
@@ -333,6 +336,10 @@ loop.
 - `simagent play` — interactive sandbox REPL with a live-updating 3D preview
 - `simagent web` — reasoning notebook: problem in, the run's chain of thought out, with comment, branch, pause and direct point-moving (live)
 - `simagent agent` — an LLM acting in the world (numbers-first tools; `--images` adds pictures) through authenticated pi providers
+- Continuing a run — `--adopt RUN_DIR` replays a finished run's whole journal,
+  hash-checked, and re-opens it; `--rounds N` loops that until a kernel stamp or
+  a budget declared before the run stops it. Every ending, including running out
+  of turns, now leaves `handoff.md` and `metrics.json`
 - Proof kernel: ten classical methods, `verified_by` trust ladder
 - Lean integration: generated core-Lean certificates (`decide`, axiom-free) for
   counterexample / construction / exhaustion; fail-closed checker

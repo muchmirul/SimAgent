@@ -101,7 +101,9 @@ SIMAGENT_LEAN=off .venv/bin/python -m pytest -q   # the no-toolchain path users 
 
 `.github/workflows/ci.yml` runs those four on every push and pull request, in
 three jobs: the suite with no Lean at all (the machine a new user actually
-has), the suite plus `bench` with Lean 4.32.1 installed by elan, and the pi
+has), the suite plus `bench` with Lean 4.32.1 installed by elan (`LEAN_VERSION`
+in ci.yml, and `tests/test_packaging.py` fails if this line and that pin ever
+disagree, because a different Lean is a different kernel), and the pi
 runtime built and tested offline. That third job still needs Python: the
 kernel-backed pi tests spawn `<repo>/.venv/bin/python -m
 simagent.kernel_transport` as a real subprocess, because the boundary is what
@@ -149,8 +151,11 @@ Each module is described once, here. State it nowhere else.
   ARCHITECTURE.md "Refuting and proving are one motion with unequal instruments".
 - `lean_check.py` + `sandbox/leangen.py` — generated Lean 4 *core*
   certificates (`by decide`, rationals as integer pairs), checked with a bare
-  `lean file.lean`. The toolchain IS installed (`~/.elan/bin/lean`, Lean
-  4.32.1, via elan, no sudo, no Mathlib). The checker rejects Lean commands
+  `lean file.lean`. The toolchain IS installed (`~/.elan/bin/lean`, via elan,
+  no sudo, no Mathlib). CI pins the version; a local elan can sit ahead of it
+  (this machine reads 4.32.2 against CI's 4.32.1), so ask `lean --version`
+  before blaming a version for a local difference. The checker
+  rejects Lean commands
   that can execute I/O, requires `#print axioms` clean, and runs model-written
   source only inside bubblewrap with no network or writable host tree. If that
   isolation cannot start, the attempt stays unverified. Lean *skeletons*

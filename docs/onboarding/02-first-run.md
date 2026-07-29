@@ -81,6 +81,7 @@ The run directory is the whole story of the run. Nothing is hidden in a database
 | File | What it is |
 |---|---|
 | `spec.json` | The conjecture as a native claim: spaces, recipe, registry keys. No code |
+| `intake.json` | The problem contract: your exact words, who formalized them, the claim hash, and whether a human approved that translation |
 | `report.json` | The search report: verdict, witness, margin range, certification detail |
 | `answer.md` | The readable verdict, witness, and method. **Read this first** |
 | `answer.tex` | The same thing as a classical LaTeX write up |

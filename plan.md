@@ -1,9 +1,13 @@
 # SimAgent v2 — Master Plan
 
-> This document is self-contained: it carries the vision, the research that
-> shaped it, every design decision with its rationale, the architecture, and
-> the phased execution plan. A reader (human or agent) starting from only this
-> file plus the repo should reach the same understanding that produced it.
+> **This is a design RECORD, not a status report. Where it disagrees with the
+> code, the code is right.** It carries the vision, the research that shaped
+> it, every design decision with its rationale, the architecture, and the
+> phased execution plan, so a reader starting from only this file plus the repo
+> reaches the same understanding that produced it. Sections written in the past
+> tense describe the state at the time they were written: section 2 is a v0.1
+> snapshot and names backends, tool lists and versions that have since changed.
+> For what is true now, read the code; for what is left to do, read list.md.
 
 ---
 

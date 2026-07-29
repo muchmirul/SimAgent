@@ -475,7 +475,16 @@ src/simagent/
                  appends its reason to `notes`)
   answer.py      Markdown / LaTeX / Lean skeleton emitters; states the d>3
                  no-Lean cap explicitly in every verdict it touches
+  explain.py     kernel state → plain English, for answer.md and the notebook;
+                 restates a stamp, never raises one
+  intake.py      the problem CONTRACT: the user's exact words, the claim hash,
+                 and the approval gate a natural-language run must pass
   pipeline.py    one run = claim → search → proof → viz → answers → report.json
+  rounds.py      the stopping rules for --rounds, in one place because the CLI
+                 loop and the evaluation arms both apply them
+  evaluate.py    does ACTING in the world help? one manifest, arms on the same
+                 tasks and budget, mechanical outcomes only, threshold declared
+                 before the run
   benchmark.py   `simagent bench`: every bundled Claim run end to end, scored
                  on verdict AND strength — the one number a change is judged by
   llm.py         formalize (native Claim synthesis from the closed vocabulary,
@@ -488,6 +497,8 @@ src/simagent/
                  annotations, stop, hash-verified prefix replay, toolCallId
                  correlation
   pi_agent.py    thin client for the TypeScript pi control service
+  cli.py         the command surface: list, bench, eval, solve, play, agent,
+                 web, formalize
   play.py, web/  shells: terminal REPL and the reasoning-notebook UI over the
                  same kernel (trace replay/live-follow via /api/runs,
                  /api/trace; agent sessions via /api/agent/start)

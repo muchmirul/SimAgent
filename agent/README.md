@@ -45,7 +45,8 @@ pi
 Inspect configuration without printing credentials:
 
 ```bash
-node dist/cli.js auth-check --provider anthropic --model claude-sonnet-4-6
+# any provider/model pair pi has authenticated; SimAgent has no blessed model
+node dist/cli.js auth-check --provider <provider> --model <model>
 ```
 
 ## Run
@@ -64,7 +65,14 @@ node dist/cli.js run --problem-id circumcenter-in-triangle --out-dir ../runs/pi-
 node dist/service.js --runs-root ../runs
 ```
 
-The control service supports start, status, events, stop, targeted comment,
-branch, model listing, and shutdown. Branches replay a hash-verified Python
-journal prefix and carry source run, step, journal sequence, and state hash as
-provenance.
+The control service supports twelve ops: `start`, `status`, `events`,
+`comment`, `userAction`, `pause`, `resume`, `stop`, `branch`, `structured`,
+`models`, `shutdown`. Two of them change the world rather than annotate it.
+`userAction` runs one of sample/set_var/nudge/construct as a journaled human
+move, so a stuck run can be unstuck by the person watching it; the instruments
+that can ESTABLISH something stay the model's alone. `pause` and `resume` hold
+the model at its next tool call, a settled boundary where the previous action
+is journaled and the next has not begun.
+
+Branches replay a hash-verified Python journal prefix and carry source run,
+step, journal sequence, and state hash as provenance.

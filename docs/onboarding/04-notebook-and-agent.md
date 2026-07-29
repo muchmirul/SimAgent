@@ -90,11 +90,12 @@ so far. **restart** stops it and re-runs the same problem in a fresh notebook.
 ## The agent's tool set
 
 The model gets no shell, no file access, no web, and none of pi's coding tools.
-It gets these twenty, and nothing else.
+It gets these twenty-one, and nothing else.
 
 | Group | Tools | What they give the model |
 |---|---|---|
 | Intent | `plan`, `expect`, `finish` | Declare a method and idea, make a falsifiable prediction the harness scores mechanically, end the run |
+| Memory | `recall` | Read back what this run recorded: acts and their margins, declared approaches, which predictions came out right, and what the kernel has established. Compaction is off, because it would break the branch hashes, so without this a long run's own journal is unreachable by the model that wrote it |
 | Perception | `look`, `check`, `measure`, `view` | See the scene as an image, get the full check, get a qualitative description, paint the margin as a `field`, `sweep`, or `trajectory` |
 | Action | `sample`, `set_var`, `nudge`, `construct` | Draw a new configuration, place a point exactly, move a point by a delta, add a derived entity such as a midpoint or circumcenter |
 | Imagination | `imagine` | Run ops on a *fork* of the world and look at the result. The real configuration is untouched and the branch is never merged |
@@ -161,10 +162,13 @@ On top of the normal run files, an agent run writes these:
 |---|---|
 | `trace.jsonl` | The mind trace: thought, action, scene, equation, and diff cells. This is what the notebook replays |
 | `kernel-journal.jsonl` | The replayable world: every kernel call and state hash. This is what a branch verifies against. Written by pi-driven runs, so very old recorded runs may not have one |
+| `handoff.md` | What this run leaves the next one, including every instrument that ran and established nothing, with the instrument's own reason. Written at EVERY ending, not only a clean `finish` |
+| `metrics.json` | This run's own mechanical counts: how it ended, turns, tool calls, tool errors, human interventions, refusals, and the stamp it reached. `evaluate.py` and the round loop read this file rather than recounting the journal |
 | `agent_summary.md` | The model's own summary of the session, with the model that produced it named in the header |
 | `runtime.json` | Which model pi routed: provider, model, thinking level. Read this before comparing two runs, because "the agent stalled here" is a statement about one model |
 | `transcript.jsonl` | The raw conversation |
-| `looks/` | Every image the agent actually saw |
+| `looks/`, `views/`, `imagined/` | Every picture the run rendered, one folder per instrument. They are written even in a numbers-first run, where the model never received them: the notebook and the trace still need the evidence |
+| `trace_renders/` | The per-step images the notebook draws when replaying |
 
 The first two are the correlated pair that matters.
 
