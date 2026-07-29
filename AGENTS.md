@@ -93,6 +93,7 @@ SIMAGENT_LEAN=off .venv/bin/python -m pytest -q   # the no-toolchain path users 
 .venv/bin/simagent solve --conjecture "..."   # needs one authenticated pi model
 .venv/bin/simagent formalize "..." --out spec.json
 .venv/bin/simagent play <id>                  # interactive REPL; preview.png re-renders per command
+.venv/bin/simagent                            # bare = `web`: the one-shot entry (reports pi routing, then the URL)
 .venv/bin/simagent web                        # reasoning notebook on :8642 (problem in, visual reasoning cells out)
 .venv/bin/simagent agent <id> [--images]      # also accepts --spec FILE or --conjecture "..."
 .venv/bin/simagent agent <id> --adopt runs/PRIOR   # continue a run that ran out of turns
@@ -317,7 +318,21 @@ Each module is described once, here. State it nowhere else.
   is deliberate: certified vs numeric-candidate vs evidence. Never upgrade the
   claim.
 - `cli.py` is the command surface listed above; `play.py` is the interactive
-  sandbox that re-renders `preview.png` after every command. `agent --rounds N`
+  sandbox that re-renders `preview.png` after every command. Bare `simagent`
+  with no subcommand IS `web`, because a usage dump helps nobody who typed the
+  program's own name, and any flags typed after it are forwarded (`simagent
+  --port 9000`); a NAMED subcommand stays strict, so a typo still fails.
+  Starting the notebook first runs `_preflight_pi`: it spawns the pi runtime,
+  prints how many models pi routes and which one is the default, and hands that
+  same warm client to `create_app`. Both of agent mode's failures are otherwise
+  silent in the browser (an unbuilt runtime is a 503 behind a button, zero
+  authenticated models is an empty dropdown), and both read as "the app is
+  broken" when the fix is one command. It never fails the command, because the
+  sandbox is the whole UI minus the model and needs no pi at all. The browser
+  opens when the server ANSWERS rather than on a timer, since a short guess
+  lands the user on a connection error and a reload of a page that was never
+  broken; and a port already serving the notebook is opened rather than
+  refused, so running the one-shot twice hands you the tab. `agent --rounds N`
   is the LOOP: round k runs into `<out>/round-k` and adopts round k-1, so a
   turn budget becomes a pause rather than the end of the work. `--rounds 0` is
   refused rather than rounded up to one, since rounding up spends a model run

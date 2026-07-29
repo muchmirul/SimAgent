@@ -115,7 +115,7 @@ Example verdict from the tetrahedron run — note the witness is *exact*:
 
 ```bash
 (cd agent && npm ci --ignore-scripts && npm run build)
-.venv/bin/simagent web
+.venv/bin/simagent
 ```
 
 Opens `http://localhost:8642` — a Jupyter-style notebook whose output is not
@@ -339,6 +339,7 @@ loop.
   approved by hash before any agent runs; a formalizer that cannot express your
   conjecture refuses rather than substituting a nearby one (`intake.json`)
 - `simagent play` — interactive sandbox REPL with a live-updating 3D preview
+- `simagent` (bare) — the one-shot: reports what pi routes, serves the notebook, opens the browser when the server answers
 - `simagent web` — reasoning notebook: problem in, the run's chain of thought out, with comment, branch, pause, direct point-moving and continue (live)
 - `simagent agent` — an LLM acting in the world (numbers-first tools; `--images` adds pictures) through authenticated pi providers
 - Continuing a run — `--adopt RUN_DIR` replays a finished run's whole journal,

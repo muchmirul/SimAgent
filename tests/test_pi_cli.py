@@ -465,3 +465,131 @@ def test_the_agent_parser_really_has_adopt_and_rounds():
 
     assert parsed["adopt"] == "runs/prior"
     assert parsed["rounds"] == 4
+
+
+def _capture_web(patch):
+    """Route _cmd_web into a dict instead of starting a server."""
+    parsed = {}
+
+    def capture(args):
+        parsed.update(vars(args))
+        return 0
+
+    patch.setattr("simagent.cli._cmd_web", capture)
+    return parsed
+
+
+def test_bare_simagent_opens_the_notebook():
+    """`simagent` with no subcommand is the one-shot entry.
+
+    A usage dump helps nobody who typed the program's own name, and this is the
+    command the tool is used through.
+    """
+    from simagent.cli import main
+
+    import pytest
+
+    with pytest.MonkeyPatch.context() as patch:
+        parsed = _capture_web(patch)
+        assert main([]) == 0
+
+    assert parsed["cmd"] == "web"
+    assert parsed["port"] == 8642 and parsed["host"] == "localhost"
+
+
+def test_bare_simagent_forwards_the_flags_typed_after_it():
+    """`simagent --port 9000` must mean what `simagent web --port 9000` means,
+    or the short form is a trap that silently ignores what you asked for."""
+    from simagent.cli import main
+
+    import pytest
+
+    with pytest.MonkeyPatch.context() as patch:
+        parsed = _capture_web(patch)
+        assert main(["--port", "9000", "--no-browser"]) == 0
+
+    assert parsed["port"] == 9000 and parsed["no_browser"] is True
+
+
+def test_a_named_subcommand_still_rejects_an_unknown_flag():
+    """Forwarding is only for the bare command. Relaxing it everywhere would
+    turn every typo into a silently ignored argument."""
+    from simagent.cli import main
+
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        main(["solve", "circumcenter-in-triangle", "--bogus"])
+    assert exc.value.code == 2
+
+
+def test_a_misspelled_subcommand_fails_instead_of_opening_the_notebook():
+    """`simagent bnch` must not quietly become `simagent web bnch`.
+
+    That is why only a leading FLAG routes to the notebook: a bare word is
+    still read as a subcommand, so a typo says so instead of opening a page
+    with a problem id nobody has.
+    """
+    from simagent.cli import main
+
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        main(["bnch"])
+    assert exc.value.code == 2
+
+
+def test_the_top_level_help_still_lists_every_command(capsys):
+    """`-h` must survive the bare-command rule, or the other seven commands
+    become undiscoverable from the tool itself."""
+    from simagent.cli import main
+
+    import pytest
+
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    for command in ("list", "bench", "solve", "play", "agent", "web", "formalize"):
+        assert command in out
+
+
+def test_the_pi_preflight_never_stops_the_notebook_from_starting(capsys):
+    """The sandbox is the whole UI minus the model and needs no pi at all.
+
+    If a missing pi runtime could fail the command, an unbuilt `agent/dist`
+    would cost the user the sample/nudge/certify/view surface too, which works
+    with no model anywhere.
+    """
+    from simagent.cli import _preflight_pi
+    from simagent.pi_agent import PiAgentError
+
+    class Broken:
+        def models(self):
+            raise PiAgentError("NOT_BUILT", "pi runtime is not built: run npm run build")
+
+    _preflight_pi(Broken())  # must not raise
+    out = capsys.readouterr().out
+    assert "NOT_BUILT" in out and "npm run build" in out
+    assert "sandbox works without it" in out
+
+
+def test_the_preflight_names_the_default_model_rather_than_leaving_it_blank():
+    """With no --provider/--model pi hands over its first authenticated model,
+    so an unnamed model is still a choice that was made. Saying which one keeps
+    it provenance rather than a blank."""
+    from simagent.cli import _preflight_pi
+
+    class Routed:
+        def models(self):
+            return [{"provider": "p", "id": "first", "vision": False},
+                    {"provider": "p", "id": "second", "vision": True}]
+
+    import io
+    import contextlib
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        _preflight_pi(Routed())
+    out = buffer.getvalue()
+    assert "2 model(s), 1 with vision" in out
+    assert "p/first" in out

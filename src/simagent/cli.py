@@ -350,29 +350,121 @@ def _loopback_sockets(port: int) -> list:
     return sockets
 
 
-def _cmd_web(args) -> int:
+def _preflight_pi(client) -> None:
+    """Start the pi runtime and say what it routes, BEFORE the URL is printed.
+
+    Agent mode is the notebook's point, and both of its failures are silent in
+    the browser: an unbuilt runtime is a 503 hiding behind a button, and zero
+    authenticated models is an empty dropdown. Each reads as "the app is
+    broken" when the fix is one command. Saying it at startup costs one spawn
+    (about 2.6s here) and leaves the client WARM, so the page's first
+    /api/agent/models answers in 0.00s instead of paying that spawn again.
+
+    It never fails the command. The sandbox (sample, nudge, certify, views) is
+    the whole UI minus the model, and it works with no pi at all.
+    """
+    from .pi_agent import PiAgentError
+
+    try:
+        models = client.models()
+    except PiAgentError as exc:
+        print(f"  pi agent mode: UNAVAILABLE ({exc.code}) -- {exc}", flush=True)
+        print("  the sandbox works without it; agent runs will report this same reason", flush=True)
+        return
+    except Exception as exc:  # noqa: BLE001 - a preflight must never block the UI
+        print(f"  pi agent mode: UNAVAILABLE -- {type(exc).__name__}: {exc}", flush=True)
+        return
+    if not models:
+        print("  pi routes 0 models: log in to a provider to use agent mode", flush=True)
+        return
+    first = models[0]
+    vision = sum(1 for m in models if m.get("vision"))
+    print(f"  pi routes {len(models)} model(s), {vision} with vision", flush=True)
+    # Name the default: with no --provider/--model pi hands over its first, so
+    # an unnamed model is still a recorded choice rather than a blank.
+    print(f"  default model: {first.get('provider')}/{first.get('id')}", flush=True)
+
+
+def _serving(port: int) -> bool:
+    """True when something already answers the notebook's own API on this port."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/api/problems", timeout=0.5
+        ) as response:
+            return response.status == 200
+    except Exception:  # noqa: BLE001 - any failure means "not serving yet"
+        return False
+
+
+def _open_when_ready(url: str, port: int) -> None:
+    """Open the browser only once the server answers, never on a timer.
+
+    A fixed delay is a guess about startup time, and when the guess is short
+    the browser lands on a connection error. The user then reloads a page that
+    was never broken, which is indistinguishable from a broken app.
+    """
     import threading
+    import time
     import webbrowser
 
+    def go() -> None:
+        for _ in range(240):  # 60s, then open anyway and let the browser say why
+            if _serving(port):
+                break
+            time.sleep(0.25)
+        webbrowser.open(url)
+
+    threading.Thread(target=go, daemon=True).start()
+
+
+def _cmd_web(args) -> int:
     import uvicorn
 
+    from .pi_agent import PiAgentClient
     from .web import create_app
 
-    app = create_app(out_root=args.out or "runs/web")
     url = f"http://{args.host}:{args.port}"
     if args.problem:
         url += f"/?problem={args.problem}"
+
+    print("SimAgent", flush=True)
+    # Already serving? Then this command's job is just to open the tab. Running
+    # it twice should hand you the notebook, not an error about a busy port.
+    if _serving(args.port):
+        print(f"  already running on port {args.port} (Ctrl-C there, or --port N, to change it)", flush=True)
+        print(f"  open: {url}", flush=True)
+        if not args.no_browser:
+            _open_when_ready(url, args.port)
+        return 0
+
+    out_root = args.out or "runs/web"
+    # Computed here and passed explicitly, so the CLI and the app cannot end up
+    # with two different ideas of where runs live.
+    traces_root = Path(out_root).parent
+    client = PiAgentClient(traces_root)
+    _preflight_pi(client)
+
+    app = create_app(out_root=out_root, runs_root=str(traces_root), agent_client=client)
     if not args.no_browser:
-        threading.Timer(0.8, webbrowser.open, args=(url,)).start()
-    print(f"SimAgent sandbox: {url}")
+        _open_when_ready(url, args.port)
+    print(f"  open: {url}", flush=True)
     config = uvicorn.Config(app, log_level="warning")
-    if args.host == "localhost":
-        sockets = _loopback_sockets(args.port)
-        if not sockets:
-            raise SystemExit(f"port {args.port} is busy on both loopback addresses")
-        uvicorn.Server(config).run(sockets=sockets)
-    else:  # an explicit --host: bind exactly what was asked for
-        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    try:
+        if args.host == "localhost":
+            sockets = _loopback_sockets(args.port)
+            if not sockets:
+                raise SystemExit(
+                    f"port {args.port} is busy on both loopback addresses "
+                    f"(another `simagent web` may already be running: try {url})"
+                )
+            uvicorn.Server(config).run(sockets=sockets)
+        else:  # an explicit --host: bind exactly what was asked for
+            uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    finally:
+        # The app did not create this client, so its lifespan will not close it.
+        client.close()
     return 0
 
 
@@ -391,7 +483,10 @@ def main(argv=None) -> int:
         prog="simagent",
         description="Sandbox-first harness for math conjectures: simulate, visualize, search, formalize.",
     )
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # Not required: bare `simagent` opens the notebook. That is the one-shot
+    # entry the tool is used through, and a usage dump helps nobody who typed
+    # the program's own name. Every existing subcommand is untouched.
+    sub = p.add_subparsers(dest="cmd", required=False)
 
     sub.add_parser("list", help="list bundled problems").set_defaults(fn=_cmd_list)
 
@@ -500,7 +595,19 @@ def main(argv=None) -> int:
     f.add_argument("--model", help="pi model id (default: pi's first authenticated model)")
     f.set_defaults(fn=_cmd_formalize)
 
-    args = p.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # No subcommand at all, or only flags: run the notebook, and hand it what
+    # was typed, so `simagent --port 9000` means `simagent web --port 9000`.
+    # Decided BEFORE parsing, because argparse would read the 9000 as the
+    # subcommand and fail. `-h` is left alone so the top-level help still
+    # lists every command. A word that is not a flag is still parsed as a
+    # subcommand, so a typo like `simagent bnch` fails instead of quietly
+    # opening the notebook. Prepending beats set_defaults on the top parser,
+    # whose defaults land in EVERY subcommand's namespace, where they would
+    # silently shadow options like `solve --out`.
+    if not raw or (raw[0].startswith("-") and raw[0] not in ("-h", "--help")):
+        raw = ["web", *raw]
+    args = p.parse_args(raw)
     return args.fn(args)
 
 

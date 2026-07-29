@@ -46,13 +46,21 @@ node agent/dist/cli.js auth-check \
 Start the notebook for each working session:
 
 ```bash
-./start.sh          # or: .venv/bin/simagent web
+.venv/bin/simagent   # the one-shot: same as `simagent web`
 ```
 
-`start.sh` is the one-command version. It kills any server still running from
-an earlier session, rebuilds the pi runtime if `agent/src` changed, warns when
-pi has no authenticated provider, and opens the browser with the thinking level
-and turn limit filled in.
+That one command checks pi routing, prints how many models pi can reach and
+which is the default, serves the notebook, and opens your browser once the
+server answers. Run it twice and the second run just opens the tab at the
+server already running, rather than failing on a busy port.
+
+`./start.sh` does three things the bare command deliberately does not, because
+each one changes something outside the notebook. It KILLS any server still
+running from an earlier session (a server holds the Python it loaded on the day
+it started, so old code keeps answering whatever the files now say), it
+REBUILDS the pi runtime when `agent/src` is newer than `agent/dist`, and it
+fills the thinking level and turn limit into the URL. Use it when you have been
+editing the code; the bare command is for opening the notebook.
 
 It does **not** pick the problem, because which problem to work on is your
 choice: the dropdown stays on "choose a bundled problem" and waits for you.
