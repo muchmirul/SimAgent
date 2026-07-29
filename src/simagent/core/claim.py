@@ -343,16 +343,38 @@ def _lean_recipe(exact: dict, recipe: list[dict], params: dict) -> str:
     for step in recipe:
         pin = leangen.RECIPE_PINS.get(step["ctor"])
         if pin is None:
+            # Name WHY, not just that it stopped: a permanent limit of the
+            # mathematics and a missing encoding are different facts, and only
+            # one of them is worth anyone's time to fix.
+            why = leangen.UNPINNABLE.get(
+                step["ctor"], "no pinning equations are defined for it")
             raise ValueError(
-                f"constructor {step['ctor']!r} has no Lean pinning equations; "
-                "a certificate over its output would check a bare number"
+                f"constructor {step['ctor']!r} has no Lean pinning equations "
+                f"({why}); a certificate over its output would check a bare "
+                "number, so the sandbox verdict stands"
             )
         pins.extend(pin(names[step["name"]], *[names[a] for a in step["args"]]))
 
-    of = params["of"]
-    T = names[of]
-    edges = [[f"(qsub {T[i][j]} {T[0][j]})" for j in range(len(T[0]))]
-             for i in range(1, len(T))]
+    # `of` is the point set whose nondegeneracy makes a simplex construction
+    # unique. A claim built from separate points (a foot, a reflection, a line
+    # intersection) has no simplex, and those pins carry their own
+    # nondegeneracy, so `of` is optional -- but only for them.
+    of = params.get("of")
+    needs = sorted({s["ctor"] for s in recipe
+                    if s["ctor"] in leangen.NEEDS_NONDEGENERATE})
+    if of is None:
+        if needs:
+            raise ValueError(
+                f"the Lean recipe hook needs `of` for {', '.join(needs)}: those "
+                "constructions are unique only when the point set is "
+                "nondegenerate, and without that the certificate would hold "
+                "for points that never determined the value"
+            )
+        edges: list[list[str]] = []
+    else:
+        T = names[of]
+        edges = [[f"(qsub {T[i][j]} {T[0][j]})" for j in range(len(T[0]))]
+                 for i in range(1, len(T))]
 
     tree = expr.parse(params["margin"])
     value = expr.evaluate(tree, env, exact=True)
@@ -385,11 +407,13 @@ def _lean_recipe(exact: dict, recipe: list[dict], params: dict) -> str:
 
 
 LEANS = {
-    "recipe": {"fn": _lean_recipe, "params": ("margin", "of", "theorem", "title"),
+    "recipe": {"fn": _lean_recipe, "params": ("margin", "theorem", "title"),
                "doc": "certificate for a margin over DERIVED entities: pins each "
                       "construction to its defining equations, so the kernel "
                       "checks how the numbers were built (`of` names the point "
-                      "set whose nondegeneracy makes the construction unique)"},
+                      "set whose nondegeneracy makes a simplex construction "
+                      "unique; required for circumcenter, orthocenter, "
+                      "barycentric and centroid, and unused otherwise)"},
     "expr": {"fn": _lean_expr, "params": ("margin", "theorem", "title"),
              "doc": "kernel-checked sign of the margin expression at an exact "
                     "rational point (no dimension cap; rejects division)"},

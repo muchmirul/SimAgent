@@ -467,12 +467,149 @@ def _pin_midpoint(out: list[str], a: list[str], b: list[str]) -> list[str]:
             for j in range(len(out))]
 
 
+def _parallel(u: list[str], v: list[str]) -> list[str]:
+    """u is parallel to v: every 2x2 minor vanishes.
+
+    True in ANY dimension, which is why collinearity is written this way rather
+    than as a 2D cross product: the same pin then serves a triangle in the
+    plane and a tetrahedron in space.
+    """
+    return [f"qeq (qmul {u[i]} {v[j]}) (qmul {u[j]} {v[i]})"
+            for i in range(len(u)) for j in range(i + 1, len(u))]
+
+
+def _pin_sub(out: list[str], a: list[str], b: list[str]) -> list[str]:
+    return [f"qeq {out[j]} (qsub {a[j]} {b[j]})" for j in range(len(out))]
+
+
+def _pin_dot(out: str, u: list[str], v: list[str]) -> list[str]:
+    return [f"qeq {out} {_dot_term(u, v)}"]
+
+
+def _pin_cross2(out: str, u: list[str], v: list[str]) -> list[str]:
+    if len(u) != 2 or len(v) != 2:
+        raise ValueError("the cross2 pin expects two 2D vectors")
+    return [f"qeq {out} (qsub (qmul {u[0]} {v[1]}) (qmul {u[1]} {v[0]}))"]
+
+
+def _pin_distance_sq(out: str, a: list[str], b: list[str]) -> list[str]:
+    d = _diff(a, b)
+    return [f"qeq {out} {_dot_term(d, d)}"]
+
+
+def _pin_segment(out: list[list[str]], a: list[str], b: list[str]) -> list[str]:
+    return ([f"qeq {out[0][j]} {a[j]}" for j in range(len(a))]
+            + [f"qeq {out[1][j]} {b[j]}" for j in range(len(b))])
+
+
+def _pin_foot(out: list[str], p: list[str], a: list[str], b: list[str]) -> list[str]:
+    """F lies on line AB, and PF is perpendicular to AB.
+
+    The third equation is the one that makes this a proof rather than a
+    coincidence: if A and B coincided, the first two would hold for EVERY
+    point, and the certificate would establish nothing about F at all.
+    """
+    ab = _diff(b, a)
+    return _parallel(_diff(out, a), ab) + [
+        f"qeq {_dot_term(_diff(out, p), ab)} {_q(0)}",
+        f"¬ qeq {_dot_term(ab, ab)} {_q(0)}",
+    ]
+
+
+def _pin_reflect(out: list[str], p: list[str], a: list[str], b: list[str]) -> list[str]:
+    """P and its image are symmetric about line AB: the midpoint of the two is
+    on the line, and the segment joining them is perpendicular to it.
+
+    Written as P + P' - 2A rather than (P + P')/2 - A so the equations stay
+    division-free, which keeps every term an exact integer pair.
+    """
+    ab = _diff(b, a)
+    mid = [f"(qsub (qadd {p[j]} {out[j]}) (qadd {a[j]} {a[j]}))"
+           for j in range(len(out))]
+    return _parallel(mid, ab) + [
+        f"qeq {_dot_term(_diff(out, p), ab)} {_q(0)}",
+        f"¬ qeq {_dot_term(ab, ab)} {_q(0)}",
+    ]
+
+
+def _pin_intersect_lines(out: list[str], a: list[str], b: list[str],
+                         c: list[str], d: list[str]) -> list[str]:
+    """X is on line AB and on line CD, and the two lines are not parallel.
+
+    Without the last condition two identical lines would admit every point on
+    them, so the certificate would pin nothing.
+    """
+    r, s = _diff(b, a), _diff(d, c)
+    if len(r) != 2 or len(s) != 2:
+        raise ValueError("the intersect_lines pin is 2D, like the constructor")
+    cross = f"(qsub (qmul {r[0]} {s[1]}) (qmul {r[1]} {s[0]}))"
+    return (_parallel(_diff(out, a), r)
+            + _parallel(_diff(out, c), s)
+            + [f"¬ qeq {cross} {_q(0)}"])
+
+
+def _pin_simplex_volume(out: str, T: list[list[str]]) -> list[str]:
+    """(k! * vol)^2 = det(E)^2 over the edge matrix, plus vol >= 0.
+
+    Squared because the constructor returns the MAGNITUDE and Lean core has no
+    absolute value; the sign condition is what stops the squared equation from
+    also admitting the negative root.
+    """
+    edges = [[f"(qsub {T[i][j]} {T[0][j]})" for j in range(len(T[0]))]
+             for i in range(1, len(T))]
+    if len(edges) > 3:
+        raise ValueError(
+            "the simplex_volume pin uses a determinant, which this encoding "
+            "caps at 3 rows; above that the certificate cannot be written"
+        )
+    det = _det(edges)
+    scaled = _fold("qadd", [out] * int(sp.factorial(len(edges))))
+    return [f"qeq (qmul {scaled} {scaled}) (qmul {det} {det})",
+            f"¬ qlt {out} {_q(0)}"]
+
+
 RECIPE_PINS = {
     "circumcenter": _pin_circumcenter,
     "orthocenter": _pin_orthocenter,
     "barycentric": _pin_barycentric,
     "centroid": _pin_centroid,
     "midpoint": _pin_midpoint,
+    "sub": _pin_sub,
+    "dot": _pin_dot,
+    "cross2": _pin_cross2,
+    "distance_sq": _pin_distance_sq,
+    "segment": _pin_segment,
+    "foot": _pin_foot,
+    "reflect": _pin_reflect,
+    "intersect_lines": _pin_intersect_lines,
+    "simplex_volume": _pin_simplex_volume,
+}
+
+# Constructions whose uniqueness comes from the SIMPLEX being nondegenerate,
+# not from the pin's own equations. A circumcenter equidistant from three
+# collinear points is not unique, so a certificate about one proves nothing
+# without the edge determinant that `of` supplies. Every other pin above
+# carries its own nondegeneracy, so it needs no point set at all.
+NEEDS_NONDEGENERATE = frozenset({
+    "circumcenter", "orthocenter", "barycentric", "centroid",
+})
+
+# Why the remaining constructors have no pin. A generic "not supported" leaves
+# the reader unable to tell a gap from a wall, and these are three different
+# things: one is permanent mathematics, one is a missing encoding, one is a
+# limit of this flat term language.
+UNPINNABLE = {
+    "incenter": (
+        "the incenter is weighted by side LENGTHS, which are square roots: it "
+        "is algebraic but not rational, so it has no exact term in this encoding"
+    ),
+    "vertex": (
+        "the row index is a value, not a coordinate, and this encoding has no "
+        "way to select a row by an index that is itself an atom"
+    ),
+    "degrees": "graphs have no Lean encoding here yet",
+    "edge_count": "graphs have no Lean encoding here yet",
+    "triangle_count": "graphs have no Lean encoding here yet",
 }
 
 

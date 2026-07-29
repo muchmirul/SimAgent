@@ -672,3 +672,59 @@ def test_a_human_can_pause_pick_a_point_move_it_and_resume(paused_server, tmp_pa
 
 if __name__ == "__main__":  # a quick manual check against a running server
     sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q", __file__]))
+
+
+@pytest.mark.skipif(_chrome() is None, reason="no headless Chromium available")
+def test_the_continue_button_is_offered_only_when_it_can_work(served_run, tmp_path):
+    """Adopt was CLI-only, so a run that died on its turn budget could be
+    watched from the page but never carried on.
+
+    The button must be DISABLED for a run with no kernel journal, because
+    adopt replays one: offering a control that cannot work is worse than not
+    offering it, and this is exactly the class of bug the DOM check exists for.
+    """
+    dom = _dump_dom(_chrome(), f"{served_run}/?run=agent-demo")
+    assert 'id="btnContinue"' in dom, "the continue control must be in the page"
+    button = dom[dom.index('id="btnContinue"'):]
+    button = button[:button.index("</button>")]
+    assert "disabled" in button, "no journal on disk, so continuing must be refused"
+
+
+@pytest.mark.skipif(_chrome() is None, reason="no headless Chromium available")
+def test_a_finished_run_with_a_journal_can_be_continued_from_the_page(tmp_path):
+    """The capability itself: a real journalled run, and a live control that
+    offers to carry it on. Written against a genuine KernelTransport run, not
+    a hand-made file, because the whole point is that adopt REPLAYS this."""
+    import uvicorn
+
+    from simagent.kernel_transport import KernelTransport
+    from simagent.web import create_app
+
+    kernel = KernelTransport(get("circumcenter-in-triangle"), tmp_path / "agent-real")
+    kernel.call_tool("c1", "look", {})
+    kernel.call_tool("c2", "set_var", {"name": "T", "values": [-1, 0, 1, 0, 0, 0.25]})
+    kernel.call_tool("c3", "certify", {})
+    kernel.call_tool("c4", "finish", {"summary": "out of ideas"})
+    kernel.finalize()
+    assert (tmp_path / "agent-real" / "kernel-journal.jsonl").is_file()
+
+    port = _free_port()
+    app = create_app(out_root=str(tmp_path / "web"), runs_root=str(tmp_path))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+                                           log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    try:
+        dom = _dump_dom(_chrome(), f"http://127.0.0.1:{port}/?run=agent-real")
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    button = dom[dom.index('id="btnContinue"'):]
+    button = button[:button.index("</button>")]
+    assert "disabled" not in button, (
+        "a finished run with a journal and a spec must be continuable")

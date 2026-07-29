@@ -352,3 +352,59 @@ def test_the_result_and_every_state_explain_themselves(traced_run):
     rows = explain.result_rows(None, {"verified_by": "none"}, None, {"margin": -1.0})
     assert any(r["value"] == "none" for r in rows)
     assert "Not a proof" in " ".join(r["why"] for r in rows)
+
+
+# -- continuing a finished run from the notebook -------------------------------
+# Adopt existed only on the command line, so the page could watch a run die on
+# its turn budget and offer nothing but starting over. These pin the boundary.
+
+def test_the_notebook_can_continue_a_finished_run(traced_run):
+    """The claim comes from the earlier run's own spec, and the earlier run's
+    directory is what the kernel replays."""
+    import json
+
+    control = FakePiControl()
+    journal = traced_run / "agent-demo" / "kernel-journal.jsonl"
+    journal.write_text('{"event": "header", "version": 4}\n')
+    with make_client(traced_run, agent_client=control) as client:
+        started = client.post("/api/agent/start", json={"adopt": "agent-demo"})
+        assert started.status_code == 200, started.json()
+        kwargs = control.calls[0][1]
+        assert kwargs["adopt"] == str(traced_run / "agent-demo")
+        assert kwargs["problem_id"] is None
+        assert str(kwargs["spec_path"]).endswith("agent-demo/spec.json")
+
+
+def test_continuing_refuses_to_also_pick_a_problem(traced_run):
+    """Naming a problem beside `adopt` could only name a DIFFERENT claim, and
+    the journal would then replay into a world that claim does not describe."""
+    control = FakePiControl()
+    (traced_run / "agent-demo" / "kernel-journal.jsonl").write_text("{}\n")
+    with make_client(traced_run, agent_client=control) as client:
+        r = client.post("/api/agent/start",
+                        json={"adopt": "agent-demo",
+                              "problem_id": "circumcenter-in-tetrahedron"})
+        assert r.status_code == 422
+        assert "brings its own claim" in str(r.json())
+
+
+def test_a_run_without_a_journal_cannot_be_continued(traced_run):
+    """Fail closed: adopt REPLAYS a journal. Without one there is nothing to
+    reproduce, and starting anyway would invent a state nobody executed."""
+    control = FakePiControl()
+    with make_client(traced_run, agent_client=control) as client:
+        r = client.post("/api/agent/start", json={"adopt": "agent-demo"})
+        assert r.status_code == 422 and "no kernel journal" in str(r.json())
+        assert client.post("/api/agent/start",
+                           json={"adopt": "../etc"}).status_code == 404
+
+
+def test_the_runs_listing_says_which_runs_can_be_continued(traced_run):
+    """The page must not offer a button that cannot work, so the judgement is
+    made where the files are."""
+    with make_client(traced_run) as client:
+        listed = {r["run"]: r for r in client.get("/api/runs").json()}
+        assert listed["agent-demo"]["continuable"] is False
+        (traced_run / "agent-demo" / "kernel-journal.jsonl").write_text("{}\n")
+        listed = {r["run"]: r for r in client.get("/api/runs").json()}
+        assert listed["agent-demo"]["continuable"] is True

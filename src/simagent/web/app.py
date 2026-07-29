@@ -185,6 +185,10 @@ class AgentStartBody(BaseModel):
     # the hash of the exact formalized claim the caller read and accepted;
     # required before an agent runs on natural-language input
     approve_claim_hash: str | None = None
+    # the NAME of an earlier run in this runs root to continue. Its journal is
+    # replayed and hash-checked, then re-opened, so a run that died on its turn
+    # budget can be carried on from the page that was watching it.
+    adopt: str | None = None
 
 
 class AgentCommentBody(BaseModel):
@@ -402,7 +406,14 @@ def create_app(
                         title = json.loads(spec_file.read_text()).get("title")
                     except (OSError, ValueError):
                         pass
-                found.append({"run": d.name, "title": title, "mtime": tf.stat().st_mtime})
+                # Whether this run can be CONTINUED. Adopt replays the journal
+                # and rebuilds the claim from the spec, so a run missing either
+                # cannot be carried on; the page needs to know before it offers.
+                found.append({
+                    "run": d.name, "title": title, "mtime": tf.stat().st_mtime,
+                    "continuable": (d / "kernel-journal.jsonl").is_file()
+                    and spec_file.is_file(),
+                })
         return sorted(found, key=lambda r: r["mtime"], reverse=True)
 
     @app.get("/api/trace/{run}")
@@ -588,14 +599,46 @@ def create_app(
 
     @app.post("/api/agent/start")
     def agent_start(body: AgentStartBody) -> dict:
-        conjecture = body.conjecture.strip() if body.conjecture else ""
-        if bool(body.problem_id) == bool(conjecture):
-            raise HTTPException(422, "give exactly one of problem_id or conjecture")
         from .. import intake as intake_mod
 
+        conjecture = body.conjecture.strip() if body.conjecture else ""
         spec_path = None
         problem_id = body.problem_id
         approved_intake = None
+        adopt_dir = None
+
+        if body.adopt:
+            # Continuing carries its own claim: the earlier run's spec.json is
+            # the same document, so asking for a problem here could only name a
+            # DIFFERENT one, and the journal would then replay into a world the
+            # claim does not describe.
+            if body.problem_id or conjecture:
+                raise HTTPException(
+                    422, "adopt continues an earlier run and brings its own claim; "
+                         "do not also give problem_id or conjecture")
+            adopt_dir = run_dir(body.adopt)
+            if not (adopt_dir / "kernel-journal.jsonl").exists():
+                raise HTTPException(
+                    422, f"run {body.adopt!r} has no kernel journal, so there is "
+                         "nothing to replay; only pi-driven runs can be continued")
+            source_spec = adopt_dir / "spec.json"
+            if not source_spec.exists():
+                raise HTTPException(
+                    422, f"run {body.adopt!r} kept no spec.json, so its claim "
+                         "cannot be reproduced")
+            spec_path = source_spec.resolve()
+            problem_id = None
+            try:
+                # The earlier run's contract, not a fresh one: it was approved
+                # for this exact claim, and re-recording it would relabel an
+                # approved conjecture as a spec file.
+                approved_intake = intake_mod.Intake.load(adopt_dir)
+            except (OSError, ValueError, KeyError):
+                approved_intake = intake_mod.record(
+                    Claim.load(spec_path), str(spec_path), "spec-file")
+        elif bool(body.problem_id) == bool(conjecture):
+            raise HTTPException(
+                422, "give exactly one of problem_id or conjecture, or adopt a run")
         if problem_id:
             try:
                 approved_intake = intake_mod.record(get(problem_id), problem_id, "bundled")
@@ -680,6 +723,7 @@ def create_app(
                 thinking_level=body.thinking_level,
                 max_turns=max(1, min(body.max_turns, 200)),
                 images=body.images,
+                adopt=str(adopt_dir) if adopt_dir is not None else None,
             )
         except Exception as exc:  # transport errors map to stable HTTP statuses
             control_error(exc)

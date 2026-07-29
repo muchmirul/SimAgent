@@ -1,6 +1,6 @@
 # SimAgent: what to do next
 
-Snapshot: 2026-07-29. Baseline: 368 Python tests + 23 pi tests green, benchmark 11/11.
+Snapshot: 2026-07-29. Baseline: 386 Python tests + 23 pi tests green, benchmark 11/11.
 
 This file is the ranked work list. It is scored against the goal below, not
 against what is interesting to build.
@@ -38,7 +38,7 @@ mathematics this harness serves". Stated once, there.
 
 ## Done
 
-The previous ten tasks all landed. What each one actually bought:
+The previous thirteen tasks all landed. What each one actually bought:
 
 | # | Task | Outcome |
 |---|---|---|
@@ -53,6 +53,8 @@ The previous ten tasks all landed. What each one actually bought:
 | 9 | Symmetry reduction | Graph enumeration up to isomorphism (1024 → 34 on five vertices), opt-in and guarded against label-sensitive claims. |
 | 10 | Geometry Lean stamps | Recipe certificates PIN each construction to its defining equations, so geometry claims reach `sandbox+lean`. |
 | 11 | A margin for the proving side | `progress["gap"]`: how far the closest Gram matrix stood from positive semidefinite, ordered so nearer means nearer to zero (-1 far, -3e-05 a hair). A refused certificate is now a position, not a wall. No new proving power, and never a verdict: a claim missing by 3e-05 is still refused. |
+| 12 | Continuing a run from the notebook | Adopt was CLI-only, so the page could watch a run die on its turn budget and offer only starting over. `POST /api/agent/start {"adopt": RUN}` plus a `continue` button, enabled only for runs that kept the journal and spec adopting needs. Checked in a real browser, both states. |
+| 13 | Pins for the rest of the geometry kit | 5 of 19 constructors could be pinned, so a claim built from a foot, a reflection or a line intersection topped out at `sandbox`. Now 14 of 19, each verified by a certificate the Lean kernel accepts and a tampered one it rejects. Every line pin asserts its own line exists, or the certificate would hold while proving nothing. |
 
 **The bug worth remembering.** `sp.nsimplify` was being applied to values that
 were already exact rationals. It searches for a "nicer" closed form and on one
@@ -71,7 +73,7 @@ step crashing exposed it. Never point nsimplify at something already exact.
 | 3 | **Does the proving margin actually get used?** `progress["gap"]` now answers every certificate attempt with a distance, but no live session has been watched spending it. | The signal was built because the cliff was established, not because a model asked for it. Whether a model walks it (widening a split, moving a cut and watching the number) or ignores it is a question only a transcript answers, so this now rides along with 1 and 2 rather than standing on its own. | Harness (evaluation) |
 | 4 | **Pi's coding-agent framing leaks in.** The model's first thought in the live run was "starting initial codebase exploration". | It recovered immediately, so this is small, but it means the session begins pointed at the wrong task. | Harness |
 | 5 | **More Space types: permutations, subsets, lattices.** | GraphSpace proved the pattern works. Each new Space opens a class of objects a mathematician can finally state. Add on demand, not in advance. | Harness |
-| 6 | **Pins for the remaining constructors.** `incenter` and the line constructors have no Lean pinning equations, so claims using them stop at `sandbox`. | Correct today (it fails closed), but it caps the strongest verdict for part of the geometry kit. | Harness |
+| 6 | **A Lean encoding for graphs, and for indexing a point set.** `degrees`, `edge_count`, `triangle_count` and `vertex` are the pins still missing, so a graph claim or one that picks a row stops at `sandbox`. | Correct today (it fails closed), and now the whole remainder of the geometry kit is pinned, so what is left is two specific encodings rather than a general gap. `incenter` is permanent: side lengths are square roots. | Harness |
 | 7 | **The last four methods.** Contradiction, contrapositive, combinatorial, infinite descent have no instrument. | A model may declare a sound method and find the harness cannot help it execute. Lower priority than it looks: those four are harder to mechanize and rarer in this domain. | Harness |
 
 ### Order

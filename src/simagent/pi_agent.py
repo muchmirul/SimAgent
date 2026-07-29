@@ -181,6 +181,7 @@ class PiAgentClient:
         max_turns: int = 40,
         run_base: str | None = None,
         images: bool = False,
+        adopt: str | None = None,
     ) -> dict:
         payload: dict[str, Any] = {
             "thinkingLevel": thinking_level,
@@ -189,6 +190,9 @@ class PiAgentClient:
             # when this run is the image arm
             "images": bool(images),
         }
+        if adopt is not None:
+            # the earlier run's directory; the kernel replays and hash-checks it
+            payload["adopt"] = str(Path(adopt).resolve())
         if problem_id is not None:
             payload["problemId"] = problem_id
         if spec_path is not None:

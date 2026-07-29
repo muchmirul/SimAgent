@@ -56,6 +56,7 @@ function resetNotebook() {
   $('verdictWrap').style.display = 'none';
   $('statusWrap').style.display = 'none';
   $('btnStop').disabled = true;
+  $('btnContinue').disabled = true;
   closeComment();
   if (ov?.open) close3d();
 }
@@ -483,6 +484,7 @@ async function openRun(run) {
   // if it is running. Without this the page can watch it but not pause, stop or
   // move a point, which is the one moment a human most wants to reach in.
   await adoptIfLive(run);
+  refreshContinue();
 }
 
 async function adoptIfLive(run) {
@@ -653,6 +655,9 @@ function startJobPolling(run) {
         clearInterval(nb.statusPoll); nb.statusPoll = null;
         $('btnStop').disabled = true;
         $('btnPause').disabled = true;
+        // the session is over, so this run becomes one that can be CONTINUED;
+        // refreshRuns re-reads whether the journal and spec are there
+        nb.job = false;
         refreshRuns().catch(() => {});
         setTimeout(() => {
           if (!nb.done && nb.tracePoll) { clearInterval(nb.tracePoll); nb.tracePoll = null; }
@@ -669,6 +674,7 @@ async function runSession(body) {
     const { run } = await api('/api/agent/start', body);
     resetNotebook();
     nb.run = run; nb.job = true; nb.lastStartBody = body;
+    refreshContinue();
     history.replaceState(null, '', `?run=${encodeURIComponent(run)}`);
     $('runMsg').textContent = `session: ${run}`;
     $('btnStop').disabled = false;
@@ -784,6 +790,27 @@ function startAgent() {
   runSession(body);
 }
 
+// Continue the run on screen instead of starting over. The claim comes from
+// that run's own spec, so no problem is chosen here: choosing one could only
+// name a DIFFERENT claim, and the journal would replay into a world it does
+// not describe. Model and budget are read fresh, because continuing with a
+// different model is a normal thing to want.
+function continueAgent() {
+  if (!nb.run) return;
+  const body = {
+    adopt: nb.run,
+    max_turns: parseInt($('maxTurns').value, 10) || 40,
+    thinking_level: $('thinkingSel').value,
+  };
+  if ($('modelSel').value) {
+    const selected = JSON.parse($('modelSel').value);
+    body.provider = selected.provider;
+    body.model = selected.id;
+  }
+  $('runMsg').textContent = `continuing ${nb.run}…`;
+  runSession(body);
+}
+
 // Pause holds the agent at a FINISHED step, which is the only state a human
 // can safely work on: the kernel is not mid-write and the next action has not
 // begun, so a move made now is the first thing the agent sees.
@@ -857,13 +884,27 @@ async function refreshRuns() {
   const sel = $('runSel');
   const keep = sel.value;
   sel.length = 1;
+  nb.continuable = new Set();
   for (const r of runs) {
     const o = document.createElement('option');
     o.value = r.run;
     o.textContent = r.title ? `${r.run} — ${r.title}` : r.run;
     sel.appendChild(o);
+    if (r.continuable) nb.continuable.add(r.run);
   }
   if (runs.some((r) => r.run === keep)) sel.value = keep;
+  refreshContinue();
+}
+
+// A finished run is not a dead end: its journal replays exactly, so the work
+// can carry on. Offered only when nothing is running, because the kernel takes
+// one controlled session at a time, and only for runs that kept the journal
+// and the spec that adopting needs.
+function refreshContinue() {
+  const button = $('btnContinue');
+  if (!button) return;
+  const ready = Boolean(nb.run) && !nb.job && nb.continuable?.has(nb.run);
+  button.disabled = !ready;
 }
 
 async function init() {
@@ -921,6 +962,7 @@ $('btnRun').onclick = () => startAgent();
 $('btnPause').onclick = () => togglePause();
 $('btnStop').onclick = () => stopSession();
 $('btnRestart').onclick = () => restartSession();
+$('btnContinue').onclick = () => continueAgent();
 $('btnRefresh').onclick = () => refreshRuns().catch(() => {});
 $('runSel').onchange = () => { if ($('runSel').value) openRun($('runSel').value).catch(() => {}); };
 $('conjText').addEventListener('input', () => { if ($('conjText').value.trim()) $('problemSel').value = ''; });

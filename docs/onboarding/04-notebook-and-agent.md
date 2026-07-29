@@ -86,6 +86,13 @@ provenance. If the hash disagrees, the branch is refused.
 
 Controls: **stop** ends the session while keeping the kernel results established
 so far. **restart** stops it and re-runs the same problem in a fresh notebook.
+**continue** is the opposite of restart: instead of throwing the run away it
+replays that run's whole journal into a new session, checks every state hash on
+the way, and re-opens the world so the model can act again. Use it when a run
+ends with the claim unsettled, which on a hard problem is the usual ending. The
+button is live only for a run that kept the journal and the spec continuing
+needs, and it takes no problem of its own: the claim comes from the run you are
+continuing.
 
 ## The agent's tool set
 

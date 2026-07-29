@@ -30,6 +30,13 @@ export interface StartRunRequest {
   runBase?: string;
   /** Send pictures to the model too. Default false: numbers-first. */
   images?: boolean;
+  /**
+   * Continue a finished run: its whole journal is replayed into this world and
+   * hash-checked, then re-opened. Until this existed the notebook could watch a
+   * run die on its turn budget but never carry it on, which is exactly the
+   * moment a human is watching.
+   */
+  adopt?: string;
 }
 
 export interface CommentRequest {
@@ -313,6 +320,7 @@ export class RunController {
       };
       if (request.problemId !== undefined) runtimeOptions.problemId = request.problemId;
       if (request.specPath !== undefined) runtimeOptions.specPath = request.specPath;
+      if (request.adopt !== undefined) runtimeOptions.adopt = resolve(request.adopt);
       if (this.repoRoot !== undefined) runtimeOptions.repoRoot = this.repoRoot;
       if (this.pythonPath !== undefined) runtimeOptions.pythonPath = this.pythonPath;
       if (this.sessionDir !== undefined) runtimeOptions.sessionDir = this.sessionDir;

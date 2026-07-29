@@ -198,10 +198,20 @@ Each module is described once, here. State it nowhere else.
   must carry an `exact` counterpart, because `_exact_recipe_env` replays the
   recipe in rational arithmetic so a margin may read a derived entity and
   still certify. Lean takes only FREE variables as atoms, so the `recipe` Lean
-  hook PINS each construction to its defining equations
-  (`leangen.RECIPE_PINS`: circumcenter, orthocenter, barycentric, centroid,
-  midpoint) and the kernel checks how the numbers were built. A constructor
-  with no pin RAISES and the claim keeps its `sandbox` stamp, because a
+  hook PINS each construction to its defining equations and the kernel checks
+  how the numbers were built. `leangen.RECIPE_PINS` covers 14 of 19: the
+  simplex ones (circumcenter, orthocenter, barycentric, centroid, midpoint)
+  plus sub, dot, cross2, distance_sq, segment, foot, reflect, intersect_lines
+  and simplex_volume. A pin must make its own construction UNIQUE: the line
+  pins therefore assert the line exists (`¬ qeq |AB|^2 0`), because with A = B
+  "F is on AB and perpendicular to it" is true of every point and the
+  certificate would establish nothing. Uniqueness that comes from the point set
+  instead is listed in `NEEDS_NONDEGENERATE`, and for those the `recipe` hook
+  still requires `of`; every other pin needs no point set, so `of` is optional
+  and a claim built from separate points can now reach `sandbox+lean`. A
+  constructor with no pin RAISES with the REASON from `leangen.UNPINNABLE`
+  (incenter is algebraic not rational, `vertex` indexes by a value, graphs have
+  no encoding yet) and the claim keeps its `sandbox` stamp, because a
   certificate over an unpinned derived value would check a bare number and
   prove nothing about its construction.
 - `core/journal.py` is the mind trace and its only import path.
@@ -471,9 +481,13 @@ Each module is described once, here. State it nowhere else.
 
 Adopt landed (2026-07-28): `--adopt` continues a finished run, `--rounds` loops
 it until a kernel stamp or a declared budget stops it, and every run now leaves
-`handoff.md` plus `metrics.json`. P7 multi-agent lanes and merge remain
-unbuilt, and the notebook cannot yet start an adopted run: adopt is CLI-only
-until the UI change is built and checked in a real browser. The pi service
+`handoff.md` plus `metrics.json`. The notebook can now continue one too
+(2026-07-29): `POST /api/agent/start {"adopt": RUN}` and a `continue` button,
+offered only when `/api/runs` reports that run `continuable` (it kept the
+journal adopt replays and the spec its claim is rebuilt from), and refused if a
+problem is named beside it, since that could only name a DIFFERENT claim. There
+is no rounds button: the notebook takes one controlled run at a time, so a round
+is a press. P7 multi-agent lanes and merge remain unbuilt. The pi service
 permits one active controlled run at a time.
 
 

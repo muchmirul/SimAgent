@@ -85,6 +85,7 @@ async function dispatch(frame: RequestFrame): Promise<unknown> {
     if (typeof frame.maxTurns === "number") request.maxTurns = frame.maxTurns;
     if (typeof frame.runBase === "string") request.runBase = frame.runBase;
     if (typeof frame.images === "boolean") request.images = frame.images;
+    if (typeof frame.adopt === "string") request.adopt = frame.adopt;
     return controller.start(request);
   }
   if (op === "status") return controller.status(String(frame.run ?? ""));

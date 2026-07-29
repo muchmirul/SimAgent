@@ -297,7 +297,18 @@ inherited steps as well as the new ones, and the model is told which steps were
 not its own. Replay re-runs every earlier act for real, so adopting a long run
 takes about as long as that run took.
 
-To do that automatically, ask for rounds:
+From the notebook, press **▶▶ continue**. It is the same thing: the run on
+screen is replayed, hash-checked and re-opened as a new session. The button is
+live only when that run kept the journal adopting replays and the spec its
+claim is rebuilt from, so it is never offered where it could not work, and you
+do not pick a problem for it: the claim comes from the run you are continuing,
+and naming another one could only ask a different question. You may change the
+model and the turn budget first, which is the normal reason to continue at all.
+
+The notebook has no rounds button, because the kernel takes one controlled
+session at a time. There, a round is a press.
+
+To loop it automatically from the command line, ask for rounds:
 
 ```bash
 .venv/bin/simagent agent circumcenter-in-triangle --rounds 3 --max-turns 40

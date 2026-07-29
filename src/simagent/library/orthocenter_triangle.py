@@ -7,10 +7,11 @@ counterexample.
 This is the known-answer test for the GEOMETRY KIT: the margin reads a
 DERIVED entity (`min(W)`, the smallest barycentric weight of a constructed
 point), which means certification has to replay the whole recipe -
-orthocenter, then barycentric - in exact rational arithmetic. Verdict tops
-out at "sandbox": Lean may only take free variables as atoms, since a
-certificate over a derived value would check a bare number and prove nothing
-about how that number was constructed.
+orthocenter, then barycentric - in exact rational arithmetic. Lean may only
+take free variables as atoms, so the certificate PINS each construction to
+its defining equations: without that, a certificate over a derived value
+would check a bare number and prove nothing about how it was built. With the
+pins the verdict reaches "sandbox+lean".
 """
 from ..core.claim import Claim
 from ..core.space import Box
