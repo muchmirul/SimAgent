@@ -1,6 +1,6 @@
 # SimAgent: what to do next
 
-Snapshot: 2026-07-25. Baseline: 215 Python tests + 12 pi tests green, benchmark 11/11.
+Snapshot: 2026-07-29. Baseline: 368 Python tests + 23 pi tests green, benchmark 11/11.
 
 This file is the ranked work list. It is scored against the goal below, not
 against what is interesting to build.
