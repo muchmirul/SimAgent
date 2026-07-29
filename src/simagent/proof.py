@@ -201,6 +201,7 @@ def _attach_sos_lean(proof: Proof, spec: Claim, cert: dict, out_dir) -> None:
 def sos_proof(
     spec: Claim, report: SearchReport | None = None, out_dir=None,
     spec_trusted: bool = False, notes: list | None = None,
+    progress: dict | None = None,
 ) -> Proof | None:
     """Prove a universal claim outright with a sum-of-squares certificate.
 
@@ -233,7 +234,8 @@ def sos_proof(
         hint = sp.Rational(report.margin_min).limit_denominator(64) / 2
     try:
         cert = sos.prove_positive(poly, symbols, eps_hint=hint,
-                                  constraints=assumptions, notes=notes)
+                                  constraints=assumptions, notes=notes,
+                                  progress=progress)
     except sos.SOSError as e:
         say(str(e))
         return None
@@ -275,6 +277,7 @@ def sos_proof(
 def cases_proof(
     spec: Claim, var: str, index: int, at, out_dir=None,
     spec_trusted: bool = False, notes: list | None = None,
+    progress: dict | None = None,
 ) -> Proof | None:
     """Prove a claim by splitting its domain in two and certifying each half.
 
@@ -302,10 +305,19 @@ def cases_proof(
 
     certs, hint = [], None
     for label, extra in halves:
+        step: dict = {}
         cert = sos.prove_positive(poly, symbols, eps_hint=hint,
-                                  constraints=assumptions + [extra], notes=notes)
+                                  constraints=assumptions + [extra], notes=notes,
+                                  progress=step)
         if cert is None:
-            say(f"no certificate for the half where {label}")
+            # Naming the half AND its distance makes the cut itself walkable:
+            # a different `at` moves this number, which a bare refusal did not.
+            gap = step.get("gap")
+            if progress is not None:
+                progress.update({**step, "case": label})
+            say(f"no certificate for the half where {label}"
+                + ("" if gap is None else
+                   f"; that half was short of positive semidefinite by {gap:.6g}"))
             return None
         if not cert["strict"]:
             say(f"the half where {label} is not STRICTLY positive (it touches "
@@ -313,6 +325,8 @@ def cases_proof(
             return None
         certs.append(cert)
 
+    if progress is not None:
+        progress.update({"gap": 0.0})
     eps = min(c["eps"] for c in certs)
     proof = Proof(
         method=Method.CASES,
@@ -357,7 +371,7 @@ def cases_proof(
 
 def induction_proof(
     spec: Claim, out_dir=None, spec_trusted: bool = False,
-    notes: list | None = None,
+    notes: list | None = None, progress: dict | None = None,
 ) -> Proof | None:
     """Prove an UNBOUNDED claim over the naturals by monotone induction.
 
@@ -402,7 +416,8 @@ def induction_proof(
     # must hold at each one. The claim's own hypotheses are not available as
     # multipliers here: a hypothesis can be false at a point the chain still
     # has to cross, which would certify a step the induction never earns.
-    cert = sos.find_sos(step, [n], constraints=[n - start], notes=notes)
+    cert = sos.find_sos(step, [n], constraints=[n - start], notes=notes,
+                        progress=progress)
     if cert is None:
         say("the step case is not certifiable: the margin was not shown to be "
             f"non-decreasing in {n.name}")

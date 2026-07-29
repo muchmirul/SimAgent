@@ -124,9 +124,9 @@ rationals that a reader checks by hand in ten seconds, with no Lean and no trust
 in this code. `positive-quadratic` is settled that way, in the positive
 direction, by the same kind of object. Those three famous counterexamples are
 cited because they show the SIZE of what one finite object can decide, not
-because disproof is the goal. Where the two directions are currently unequal is
-in the instruments, not in the aim: see "Refuting and proving are one motion
-with unequal instruments" under the proof kernel.
+because disproof is the goal. Both directions now answer a move with a number,
+which is what lets a model work its way toward either: see "Refuting and proving
+are one motion with unequal instruments" under the proof kernel.
 
 Olympiad inequalities are the benchmark that earns credibility, not the
 destination.
@@ -154,10 +154,11 @@ The rules that follow, each of which has bitten or nearly bitten:
    notes. A bundled claim documents its ground truth because it is a
    known-answer TEST of the machine, not a worked solution for the model.
 2. **An instrument reports its own limits, and never the next move.** "No
-   certificate found; the Gram matrix was not PSD" is information the model
-   needs. "Try induction instead" is the model's decision, taken from it. Both
-   `sos.find_sos` and `proof.sos_proof` append reasons to `notes` for exactly
-   this reason.
+   certificate found; the Gram matrix was short of positive semidefinite by
+   -0.0033" is information the model needs. "Try induction instead" is the
+   model's decision, taken from it. Both `sos.find_sos` and `proof.sos_proof`
+   append reasons to `notes` and a distance to `progress` for exactly this
+   reason: a measurement is a fact, a recommendation is the model's job.
 3. **A mechanical check is not an answer to the question.** `run_search`
    finding a counterexample is the harness executing, and the WITNESS is a
    fact. That the conjecture was worth attacking that way, and what it means,
@@ -268,26 +269,41 @@ value is negative and settles nothing when it is positive. Closing the gap
 between the seen minimum and the true minimum is exactly the job of a
 certificate.
 
-The mathematics is symmetric. The instruments are not:
+The mathematics is symmetric, and each direction now answers with a quantity:
 
 | direction | what the model can act with | what comes back |
 |---|---|---|
 | toward a counterexample | sample, set_var, nudge, refine, hunt, exhaust, construct | a margin number after every single move, so the next move is informed by the last |
-| toward a proof | sum_of_squares, prove_by_cases, prove_by_induction, submit_lean_proof | accepted or refused, plus one sentence of reason ("the margin has odd total degree", "no positive-semidefinite solution was found") |
+| toward a proof | sum_of_squares, prove_by_cases, prove_by_induction, submit_lean_proof | accepted or refused, the reason in words, and `progress.gap`: how far the closest candidate Gram matrix stood from positive semidefinite |
 
-Refuting is therefore a progression the model can act inside, while proving is a
-cliff it either clears or does not. A refused certificate names WHY it failed,
-which the model needs, but carries no quantity saying how near it came, so a
-second attempt starts from the same place as the first.
+**The proving side's margin is `gap`** (`sos._psd_gap`): the most negative
+eigenvalue of the nearest Gram matrix the search actually built, and exactly
+`0.0` once the EXACT rational split accepts one. A far-off claim reads about
+-1, a claim that misses by a hair reads -3e-05, so a second attempt can be
+compared with the first instead of starting from the same place. It is measured
+on every candidate and on every rung of the strictness ladder, and the nearest
+of them is what the refusal reports.
 
-**This is an instrument gap, not a property of the mathematics, and not the
-intended shape of the harness.** It is why the machine reads as a counterexample
-machine even though the bundled set is six false claims and five true ones, and
-four of those five reach `sandbox+lean` (three by SOS, one by exhaustion). The
-proving side works. What it lacks is the step-by-step feedback the refuting side
-has, which is a different problem. The harness owes capability and
-perception in both directions; today it pays them unevenly. Widening the proving
-side into a progression is open work, ranked in list.md.
+Three properties keep it honest, all enforced in `tests/test_sos.py`:
+
+1. **Ordered.** Nearer to a certificate means nearer to zero, or the number
+   would be noise the model cannot walk.
+2. **Never a verdict.** A gap of -1e-5 is still a refusal. `(x-1)² + (y-1)² -
+   1/10000` is FALSE and reads -3.3e-05, so a harness that treated small as
+   settled would stamp a false claim proved. Only `proof.py` stamps, and only
+   from the exact check.
+3. **Numeric only where it may be.** The eigenvalue is floating point because
+   it is perception. The decision stays exact rational arithmetic plus Lean.
+
+`progress` travels as an out-parameter dict through `find_sos` →
+`prove_positive` → `sos_proof` / `cases_proof` / `induction_proof` → the tool
+result the model reads. For `prove_by_cases` it also names WHICH half fell
+short, which makes the cut value itself walkable: a different `at` moves the
+number.
+
+This closed the last known instrument gap. It adds no proving power: what the
+harness could certify before, it certifies now, and nothing more. What changed
+is that a refused attempt is a position rather than a wall.
 
 ## Lean certificates (`sandbox/leangen.py`, `lean_check.py`)
 
@@ -331,6 +347,10 @@ arithmetic exact below `2^53`); a case whose `check` raises makes the whole
 domains are rejected; case counting uses Python ints (no `np.prod` overflow).
 
 ## Data flow
+
+The shape is below; **[docs/data-flow.md](docs/data-flow.md) walks the same two
+paths naming the FORMAT on every boundary**, with a real value from a real run
+at each one.
 
 A batch run (`simagent solve`):
 

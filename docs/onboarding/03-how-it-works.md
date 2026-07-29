@@ -101,13 +101,14 @@ The split is the point. The harness can mechanize three of the ten. For the
 other seven it grades nothing. An argument in prose, however good, is recorded
 as `verified_by: none` until the Lean kernel accepts it.
 
-One honest caveat about how those instruments feel to use. Working toward a
-counterexample, the model gets a margin number back after every move, so each
-move informs the next. Working toward a proof, it gets accepted or refused plus
-one sentence of reason, and no number telling it how close the attempt came.
-Refuting is a progression; proving is a cliff. That is a gap in the instruments,
-not in the mathematics, and it is written up in ARCHITECTURE.md under "Refuting
-and proving are one motion with unequal instruments".
+Both directions answer a move with a number. Working toward a counterexample,
+the model gets the margin back after every move. Working toward a proof, a
+refused certificate reports `gap`: how far the closest attempt stood from being
+a sum of squares. A claim that is far off reads about -1, one that misses by a
+hair reads -3e-05, and 0 is what a certificate needs, so a second attempt can be
+compared with the first. The number is perception and never a verdict, since a
+claim that misses by a hair is still false. It is written up in ARCHITECTURE.md
+under "Refuting and proving are one motion with unequal instruments".
 
 One family of proofs is worth knowing, because search alone can never reach it.
 Search can refute a `forall`, by finding one bad case, but it can never establish

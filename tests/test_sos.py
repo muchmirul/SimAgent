@@ -119,6 +119,66 @@ def test_every_failure_mode_tells_the_model_something_actionable():
         assert any(expected in n for n in notes), f"{name}: {notes}"
 
 
+def test_a_refused_attempt_reports_how_far_it_stood():
+    """Refuting answers every move with a margin; proving answered only
+    accepted-or-refused, so a second attempt began where the first did.
+
+    A refusal must now carry a QUANTITY: how far the closest Gram matrix was
+    from positive semidefinite. Not a verdict, and nothing is stamped from it.
+    """
+    notes, progress = [], {}
+    assert sos.prove_positive(2 * (x**2 + y**2 + z**2) - (x + y + z) ** 2,
+                              [x, y, z], notes=notes, progress=progress) is None
+    assert progress["gap"] is not None and progress["gap"] < 0
+    assert any("most negative eigenvalue" in n for n in notes)
+
+
+def test_the_distance_is_ordered_so_it_can_be_walked():
+    """A number is only useful if nearer means nearer. Three claims of
+    increasing nearness to provable must report increasing (less negative)
+    distances, or the model cannot tell an improvement from a wobble."""
+    def gap(poly):
+        progress = {}
+        sos.prove_positive(poly, [x, y], progress=progress)
+        return progress["gap"]
+
+    far = gap(2 * (x**2 + y**2) - (x + y) ** 2 - 1)
+    near = gap((x - 1) ** 2 + (y - 1) ** 2 - sp.Rational(1, 100))
+    nearer = gap((x - 1) ** 2 + (y - 1) ** 2 - sp.Rational(1, 10000))
+    assert far < near < nearer < 0
+
+
+def test_a_certificate_that_was_found_reports_zero_distance():
+    """Zero is what a certificate needs, and it is asserted from the EXACT
+    positive-semidefinite split, not from the floating-point eigenvalue."""
+    progress = {}
+    found = sos.prove_positive(x**2 + y**2 + 1 - x - y, [x, y], progress=progress)
+    assert found is not None and found["strict"] is True
+    assert progress["gap"] == 0.0
+
+
+def test_the_distance_never_becomes_a_verdict():
+    """A gap near zero is still not a proof. The claim below is FALSE and its
+    closest attempt is within 1e-4 of positive semidefinite, so a harness that
+    read the number as a verdict would stamp a false claim proved."""
+    poly = (x - 1) ** 2 + (y - 1) ** 2 - sp.Rational(1, 10000)
+    progress = {}
+    assert sos.prove_positive(poly, [x, y], progress=progress) is None
+    assert -1e-3 < progress["gap"] < 0
+
+
+def test_the_model_can_read_the_distance(tmp_path):
+    """A quantity the instrument computes and keeps to itself helps nobody."""
+    import json
+
+    from simagent.agent import AgentRun
+
+    run = AgentRun(get("sum-of-squares-vs-linear"), out_dir=tmp_path)
+    out = json.loads(run._t_sum_of_squares())
+    assert out["proved"] is False
+    assert out["progress"]["gap"] is not None
+
+
 def test_certificate_is_printed_as_checkable_mathematics():
     """The identity IS the proof. A reader must be able to expand it by hand
     and settle the claim without Lean and without trusting this code."""

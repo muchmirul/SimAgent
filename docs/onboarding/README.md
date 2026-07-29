@@ -38,6 +38,7 @@ case for real.
 | [../../README.md](../../README.md) | Project pitch and feature summary |
 | [../../GUIDE.md](../../GUIDE.md) | Day to day operating guide for the web notebook |
 | [../../ARCHITECTURE.md](../../ARCHITECTURE.md) | Kernel design and the rules a contributor must not break |
+| [../data-flow.md](../data-flow.md) | End to end: every boundary the data crosses, and its format |
 | [../../CLAUDE.md](../../CLAUDE.md) | The module by module map, for anyone editing code |
 | [../../plan.md](../../plan.md), [../../list.md](../../list.md) | Roadmap and ranked work list |
 | [../P0_PI_SPIKE_REPORT.md](../P0_PI_SPIKE_REPORT.md) | Why the pi runtime was chosen |

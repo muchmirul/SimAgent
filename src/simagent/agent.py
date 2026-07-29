@@ -783,9 +783,11 @@ class AgentRun:
         # one case this refuses.
         report = self.best_report()
         notes: list[str] = []
+        progress: dict = {}
         proof = proof_mod.sos_proof(
             self.spec, report, out_dir=self.out,
             spec_trusted=library.is_bundled(self.spec), notes=notes,
+            progress=progress,
         )
         if proof is not None:
             self._keep_best_deductive(proof)
@@ -796,15 +798,18 @@ class AgentRun:
             "verified_by": proof.verified_by if proof else "none",
             "argument": proof.argument if proof else None,
             "notes": notes,
+            "progress": progress or None,
         })
 
     def _t_prove_by_cases(self, var: str, at: float, index: int = 0):
         from . import library
 
         notes: list[str] = []
+        progress: dict = {}
         proof = proof_mod.cases_proof(
             self.spec, var, index, at, out_dir=self.out,
             spec_trusted=library.is_bundled(self.spec), notes=notes,
+            progress=progress,
         )
         if proof is not None:
             self._keep_best_deductive(proof)
@@ -815,15 +820,18 @@ class AgentRun:
             "verified_by": proof.verified_by if proof else "none",
             "argument": proof.argument if proof else None,
             "notes": notes,
+            "progress": progress or None,
         })
 
     def _t_prove_by_induction(self):
         from . import library
 
         notes: list[str] = []
+        progress: dict = {}
         proof = proof_mod.induction_proof(
             self.spec, out_dir=self.out,
             spec_trusted=library.is_bundled(self.spec), notes=notes,
+            progress=progress,
         )
         if proof is not None:
             self._keep_best_deductive(proof)
@@ -834,6 +842,7 @@ class AgentRun:
             "verified_by": proof.verified_by if proof else "none",
             "argument": proof.argument if proof else None,
             "notes": notes,
+            "progress": progress or None,
         })
 
     def _t_submit_lean_proof(self, method: str, argument: str, lean_code: str | None = None):

@@ -29,9 +29,10 @@ core idea of sim agent is this :
 Other docs, so you do not duplicate them here: ARCHITECTURE.md (kernel design +
 contributor rules), README.md (what the project is, for a newcomer),
 docs/onboarding/ (six pages for someone who has never seen the project; start
-there before this file), GUIDE.md (how to use the tool), plan.md (the P0-P7
-roadmap), list.md (the ranked work list), agent/README.md (the pi package on
-its own terms).
+there before this file), docs/data-flow.md (the end-to-end walk: every boundary
+the data crosses, its FORMAT, and a real value from a real run at each one),
+GUIDE.md (how to use the tool), plan.md (the P0-P7 roadmap), list.md (the
+ranked work list), agent/README.md (the pi package on its own terms).
 
 **Four standards bind every change. Read ARCHITECTURE.md for all four before
 you build anything** ("The harness answers nothing", "Scope: which mathematics
@@ -136,17 +137,16 @@ Each module is described once, here. State it nowhere else.
   Refuting and proving are ONE motion: for a `forall` the deciding quantity is
   the MINIMUM of the margin, so search walking downhill serves both answers, and
   what it returns is only the smallest margin SEEN (a certificate is what closes
-  the gap to the true minimum). The instruments are unequal, though. The
-  counterexample side answers every single move with a number the model can walk;
-  the proving side answers accepted-or-refused plus one sentence of reason, with
-  no quantity saying how near the attempt came, so a second attempt starts where
-  the first did. That is an instrument gap to close, NOT the intended shape of
-  the harness, and it is why the machine reads as a counterexample machine even
-  though the bundled set is six false claims and five true ones, four of which
-  reach `sandbox+lean`. The proving side WORKS; what it lacks is step-by-step
-  feedback. See
-  ARCHITECTURE.md "Refuting and proving are one motion with unequal instruments"
-  and list.md item 3.
+  the gap to the true minimum). Both directions now answer a move with a number.
+  The proving side's is `progress["gap"]` (`sos._psd_gap`): how far the closest
+  candidate Gram matrix stood from positive semidefinite, exactly 0.0 once the
+  EXACT split accepts one. It rides an out-parameter dict from `find_sos` through
+  `prove_positive`, `sos_proof`/`cases_proof`/`induction_proof`, to the tool
+  result, so a refused attempt is a position rather than a wall and a second
+  attempt can be compared with the first. It is PERCEPTION, never a verdict: a
+  claim that misses by 3e-05 is still false, only `proof.py` stamps, and the
+  stamp comes from exact arithmetic plus Lean. This adds no proving power. See
+  ARCHITECTURE.md "Refuting and proving are one motion with unequal instruments".
 - `lean_check.py` + `sandbox/leangen.py` — generated Lean 4 *core*
   certificates (`by decide`, rationals as integer pairs), checked with a bare
   `lean file.lean`. The toolchain IS installed (`~/.elan/bin/lean`, Lean

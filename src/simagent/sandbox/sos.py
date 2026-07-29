@@ -62,6 +62,20 @@ def _monomials(nvars: int, degree: int) -> list[tuple]:
     return sorted(set(out))
 
 
+def _psd_gap(G: sp.Matrix) -> float:
+    """How far a Gram matrix is from positive semidefinite: its most negative
+    eigenvalue, and 0.0 once it is PSD.
+
+    This is the proving side's margin. Refuting a claim answers every move with
+    a number the model can walk downhill; a certificate attempt answered only
+    accepted-or-refused, so a second attempt began exactly where the first did.
+    The quantity is numeric and reported only: nothing is ever stamped from it,
+    and the exact rational check remains the sole judge of a certificate.
+    """
+    A = np.array(G.tolist(), dtype=float)
+    return float(min(np.linalg.eigvalsh((A + A.T) / 2).min(), 0.0))
+
+
 def _psd_squares(G: sp.Matrix) -> list[tuple] | None:
     """Exact rational LDL-style decomposition: G = sum_i d_i v_i v_i^T.
 
@@ -174,7 +188,7 @@ def _poly_terms(g: sp.Expr, symbols: list) -> dict:
 
 
 def find_sos(poly: sp.Expr, symbols: list, eps=0, constraints=(),
-             notes: list | None = None) -> dict | None:
+             notes: list | None = None, progress: dict | None = None) -> dict | None:
     """Exact rational certificate that `poly - eps` is nonnegative, or None.
 
         poly - eps  =  sigma_0  +  sum_k sigma_k * g_k       (all sigma SOS)
@@ -187,9 +201,14 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, constraints=(),
 
     Raises SOSError when the margin is not a polynomial (or is past the size
     caps); returns None when no certificate was found by this incomplete
-    search. Every failure appends its REASON to `notes`.
+    search. Every failure appends its REASON to `notes`, and `progress` (an
+    out-parameter dict) carries the QUANTITY behind it: `gap`, how far the
+    closest candidate Gram matrix was from positive semidefinite, so a refused
+    attempt is a position rather than a wall.
     """
     say = notes.append if notes is not None else (lambda _m: None)
+    if progress is not None:
+        progress.update({"gap": None, "eps": str(_exact(eps)), "candidates": 0})
     target_expr = sp.expand(poly - _exact(eps))
     if len(symbols) > MAX_VARS:
         raise SOSError(f"sum-of-squares search caps at {MAX_VARS} variables")
@@ -268,23 +287,37 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, constraints=(),
     # Zero is only the first guess. When it is not positive semidefinite the
     # remaining freedom is searched numerically and the answer snapped back to
     # rationals, so "not found" stops meaning "we did not look".
+    best_gap: float | None = None
+    tried = 0
+    rounded_off_target = False
     for assignment in _candidate_assignments(sub, unknowns, free, blocks):
         values = {s: sp.cancel(sp.sympify(sub.get(s, s)).subs(assignment))
                   for s in unknowns}
         if any(not v.is_rational for v in values.values()):
             continue
-        ok = True
+        tried += 1
         for b in blocks:
             n = len(b["basis"])
             syms = b["syms"]
             b["gram"] = sp.Matrix(n, n, lambda i, j: values[syms[(min(i, j), max(i, j))]])
+        # Measured for every candidate, including the ones that fail: the whole
+        # point is that a failure still reports where it stood.
+        gap = min(_psd_gap(b["gram"]) for b in blocks)
+        if best_gap is None or gap > best_gap:
+            best_gap = gap
+        ok = True
+        for b in blocks:
             b["squares"] = _psd_squares(b["gram"])
             if b["squares"] is None:
                 ok = False
                 break
-        if ok and _verify_blocks(target_expr, symbols, blocks):
-            break
+        if ok:
+            if _verify_blocks(target_expr, symbols, blocks):
+                break
+            rounded_off_target = True
     else:
+        if progress is not None:
+            progress.update({"gap": best_gap, "candidates": tried})
         # Report the limit, name neither a verdict nor a next method: choosing
         # what to try next is the model's job, not the harness's.
         say("no positive-semidefinite solution was found. The numeric search "
@@ -292,7 +325,20 @@ def find_sos(poly: sp.Expr, symbols: list, eps=0, constraints=(),
             "exist that this missed. The margin may equally be negative "
             "somewhere on the domain. This instrument cannot tell those two "
             "cases apart")
+        if best_gap is not None:
+            say(f"distance from a certificate: the closest of {tried} candidate "
+                f"Gram matrices was short of positive semidefinite by "
+                f"{best_gap:.6g} (its most negative eigenvalue), at eps = "
+                f"{_exact(eps)}. A certificate needs 0")
+        if rounded_off_target:
+            say("one candidate was positive semidefinite but its rounded "
+                "rational entries no longer reproduced the margin exactly")
         return None
+    if progress is not None:
+        # Exactly 0: the winning Gram matrix passed the EXACT positive-semidefinite
+        # split, so its distance is zero as a fact of rational arithmetic, whatever
+        # rounding the eigenvalue routine reports.
+        progress.update({"gap": 0.0, "candidates": tried})
     # Every monomial the decomposition can PRODUCE, not just the ones the margin
     # mentions: a product the margin lacks still has to be forced to zero, and
     # the Lean check can only force what it is given.
@@ -351,7 +397,7 @@ def _verify(target_expr: sp.Expr, symbols: list, basis: list, squares: list) -> 
 
 
 def prove_positive(poly: sp.Expr, symbols: list, eps_hint=None, constraints=(),
-                   notes: list | None = None) -> dict | None:
+                   notes: list | None = None, progress: dict | None = None) -> dict | None:
     """Certify p > 0 everywhere (strict) by certifying p - eps as SOS.
 
     `eps_hint` is typically half the smallest margin the search ever saw. A
@@ -367,12 +413,42 @@ def prove_positive(poly: sp.Expr, symbols: list, eps_hint=None, constraints=(),
         e = _exact(eps_hint)
         candidates = [e, e / 4, e / 64]
     candidates += [sp.Rational(1, 2**k) for k in range(0, 11)]
+
+    # The closest attempt across the whole ladder, kept rather than thrown away:
+    # every rung used to fail silently, so the model saw one refusal and no sign
+    # that eleven strictness levels had been measured.
+    best: dict | None = None
+
+    def keep(step: dict) -> None:
+        nonlocal best
+        if step.get("gap") is not None and (best is None or step["gap"] > best["gap"]):
+            best = dict(step)
+
     for eps in candidates:
-        found = find_sos(poly, symbols, eps=eps, constraints=constraints)
+        step: dict = {}
+        found = find_sos(poly, symbols, eps=eps, constraints=constraints,
+                         progress=step)
+        keep(step)
         if found is not None:
             found["strict"] = True
+            if progress is not None:
+                progress.update(step)
             return found
-    found = find_sos(poly, symbols, eps=0, constraints=constraints, notes=notes)
+    step = {}
+    found = find_sos(poly, symbols, eps=0, constraints=constraints, notes=notes,
+                     progress=step)
+    keep(step)
+    if progress is not None:
+        # a non-strict success is described by the attempt that succeeded;
+        # a total failure by the nearest attempt anywhere on the ladder
+        progress.update(step if found is not None else (best or step))
+    if (found is None and best is not None
+            and (step.get("gap") is None or best["gap"] > step["gap"])):
+        # The eps = 0 attempt already reported its own gap, so this line is added
+        # only when a different rung of the ladder actually came nearer.
+        say = notes.append if notes is not None else (lambda _m: None)
+        say(f"nearest over all {len(candidates) + 1} strictness levels: eps = "
+            f"{best['eps']}, short of positive semidefinite by {best['gap']:.6g}")
     if found is not None:
         found["strict"] = False
         if notes is not None:
