@@ -332,6 +332,20 @@ def certify_candidate(
     `certified` confirms the numeric holds/fails verdict in exact rationals.
     """
     comp = spec.compiled()
+    # "Invalid" and "degenerate" are different dead ends and the model can only
+    # act on one of them, so say which happened. A point where the claim's own
+    # hypotheses fail is a point it asserts nothing at: certifying it would
+    # settle nothing, however clean the arithmetic came out.
+    try:
+        covered = comp.valid(**vars)
+    except Exception:  # noqa: BLE001 - a raising filter is not a covered point
+        covered = False
+    if not covered:
+        raise ValueError(
+            "this configuration is outside what the claim covers: its "
+            "hypotheses or constraint do not hold here, so certifying it would "
+            "settle nothing about the claim"
+        )
     res = _safe_check(comp, vars)
     if res is None:
         raise ValueError("configuration is invalid or degenerate; cannot certify")

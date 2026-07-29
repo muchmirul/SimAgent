@@ -43,6 +43,59 @@ def _int_domain_claim(low, high, shape=(), margin="1"):
     )
 
 
+# ---- the claim's own domain and its own margin ----------------------------
+
+def test_a_lean_hook_of_any_kind_must_measure_the_claims_margin():
+    """The verbatim-margin gate used to fire only for hooks of kind "expr".
+
+    A `recipe` Lean hook carries a margin too, so it could name any expression
+    and still upgrade the stamp: setting only lean["margin"] = "1" on a bundled
+    claim passed validation with no errors at all, and the kernel would then
+    check a quantity the claim never measured.
+    """
+    import copy
+
+    claim = get("orthocenter-in-triangle")
+    assert claim.lean["kind"] == "recipe", "this test needs a non-expr hook"
+    assert validate_claim(claim) == []
+
+    tampered = copy.deepcopy(claim)
+    tampered.lean = dict(tampered.lean)
+    tampered.lean["margin"] = "1"
+    assert any("must repeat the measure's margin" in e
+               for e in validate_claim(tampered)), validate_claim(tampered)
+
+
+def test_a_point_the_hypothesis_excludes_cannot_certify_anything():
+    """The checker and the prover must agree on which points a claim covers.
+
+    `assume` used to be read only by the proof path, so the runtime filter knew
+    nothing about it: `conditional-cubic` assumes x >= 0, and certifying it at
+    x = -2 returned certified True, holds False, margin -5. That is a checkable
+    "counterexample" to a claim that never covered that point.
+
+    Moving there is still allowed, because exploring is not claiming. Only the
+    truth layer refuses, and it says why.
+    """
+    import tempfile
+
+    from simagent.web.session import SandboxSession
+
+    claim = get("conditional-cubic")
+    assert claim.assume == ["P[0]"] and claim.constraint is None
+    engine = claim.compiled()
+    assert engine.valid(P=np.array([1.5])) is True
+    assert engine.valid(P=np.array([-2.0])) is False
+
+    with tempfile.TemporaryDirectory() as tmp:
+        session = SandboxSession(claim, tmp)
+        session.set_value("P", None, [-2.0])          # exploring is free
+        with pytest.raises(ValueError, match="outside what the claim covers"):
+            session.certify()                          # claiming is not
+        session.set_value("P", None, [1.5])
+        assert session.certify()["certified"] is not None
+
+
 # ---- exhaustion soundness -------------------------------------------------
 
 def test_case_count_rejects_inverted_and_empty_domains():

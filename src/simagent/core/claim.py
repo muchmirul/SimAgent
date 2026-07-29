@@ -548,6 +548,8 @@ class NativeEngine:
         self.claim = claim
         self.has_certify = claim.certify is not None
         self.has_lean_certificate = claim.lean is not None
+        # Parsed once: `valid` runs on every sample of every search.
+        self._assumed = [expr.parse(a) for a in (claim.assume or [])]
 
     def check(self, **vars) -> NativeCheckResult:
         env = _recipe_env(self.claim.recipe, vars)
@@ -558,6 +560,18 @@ class NativeEngine:
         return res
 
     def valid(self, **vars) -> bool:
+        # A claim's hypotheses say which points it is ABOUT, so a point where
+        # one fails is a point the claim asserts nothing at and can never be
+        # settled by. `assume` used to be read only by the proof path, which
+        # left the checker and the prover disagreeing about the same claim:
+        # `conditional-cubic` assumes x >= 0, and certifying it at x = -2
+        # returned an exact witness with margin -5 and holds False, a checkable
+        # "counterexample" to a claim that never covered that point.
+        if self._assumed:
+            env = _recipe_env(self.claim.recipe, vars)
+            for tree in self._assumed:
+                if float(expr.evaluate(tree, env)) < 0:
+                    return False
         if self.claim.constraint is None:
             return True
         c = CONSTRAINTS[self.claim.constraint["kind"]]
@@ -836,15 +850,26 @@ def validate_claim(claim: Claim, samples: int = 8, seed: int = 0) -> list[str]:
             unknown = expr.names(tree) - known
             if unknown:
                 errors.append(f"measure expression reads unknown entities: {sorted(unknown)}")
-        # Certifying or Lean-stamping a *different* expression than the one
-        # measured would prove nothing about this claim: fail closed.
-        for slot in ("certify", "lean"):
-            block = getattr(claim, slot)
-            if isinstance(block, dict) and block.get("kind") == "expr":
-                if block.get("margin") != claim.measure.get("margin"):
-                    errors.append(
-                        f"{slot} margin must repeat the measure's margin verbatim"
-                    )
+    # Certifying or Lean-stamping a *different* expression than the one measured
+    # would prove nothing about this claim: fail closed. This binds EVERY hook
+    # that carries a margin, not only `expr` ones. The test used to look at
+    # `kind == "expr"`, so a `recipe` Lean hook (which takes a margin too) could
+    # name any expression and still upgrade the stamp: setting only
+    # lean["margin"] = "1" on a bundled claim passed validation with no errors.
+    measured = claim.measure.get("margin") if isinstance(claim.measure, dict) else None
+    for slot in ("certify", "lean"):
+        block = getattr(claim, slot)
+        if not isinstance(block, dict) or block.get("margin") is None:
+            continue
+        if measured is None:
+            errors.append(
+                f"{slot} declares a margin but the measure does not, so nothing "
+                f"checks that the two describe the same quantity"
+            )
+        elif block.get("margin") != measured:
+            errors.append(
+                f"{slot} margin must repeat the measure's margin verbatim"
+            )
     if errors:
         return errors
 
