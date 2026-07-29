@@ -24,9 +24,15 @@ from pathlib import Path
 # Tokens that would make "checked by the kernel, axiom-free" false.
 _FORBIDDEN = ("sorry", "admit", "sorryAx", "native_decide")
 
-# These constructs can run user code while Lean elaborates a file. Search the
-# raw source, not comment-stripped source: rejecting a harmless mention is safer
-# than letting a crafted string confuse a best-effort comment stripper.
+# These constructs can run user code while Lean elaborates a file. UNTRUSTED
+# source is searched raw, not comment-stripped: rejecting a harmless mention is
+# safer than letting a crafted string confuse a best-effort comment stripper.
+# GENERATED source is searched comment-stripped instead, because its only free
+# text is the claim's title inside one block comment whose delimiters leangen
+# has already neutralised. Scanning that raw cost a correct proof its Lean
+# stamp whenever a title happened to contain an ordinary English word: a title
+# reading "System of circumcenter constraints" dropped the claim from
+# sandbox+lean to sandbox, which is a verdict decided by prose.
 _UNSAFE_WORDS = (
     "import",
     "initialize",
@@ -152,12 +158,12 @@ def _check(source: str, workdir, timeout: int, *, isolate: bool) -> dict:
         result["output"] = "no Lean toolchain (install elan; see README)"
         return result
 
-    unsafe = _unsafe_source_reason(source)
+    code = _strip_comments(source)
+    unsafe = _unsafe_source_reason(source if isolate else code)
     if unsafe:
         result["output"] = f"source uses {unsafe}"
         return result
 
-    code = _strip_comments(source)
     for token in _FORBIDDEN:
         if re.search(rf"\b{re.escape(token)}\b", code):
             result["output"] = f"source uses forbidden construct: {token}"

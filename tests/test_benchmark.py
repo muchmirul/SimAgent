@@ -21,14 +21,28 @@ def test_every_bundled_claim_has_a_stated_expectation():
 
 
 def test_benchmark_is_green():
+    """Two different things are checked, and only one of them needs Lean.
+
+    The VERDICT is what the machine concluded, and it is judged on every
+    machine: a claim flipping from `counterexample` to `no_counterexample` is
+    wrong whether or not a toolchain is installed. The STRENGTH is how well
+    that conclusion was checked, and only the top rung is out of reach without
+    Lean.
+
+    Dropping the whole row on a no-Lean machine used to excuse both at once, so
+    8 of the 11 known-answer claims were checked for nothing at all in the CI
+    job that has no toolchain, verdicts included.
+    """
     rows = benchmark.run_all(trials=400, seed=0)
-    failures = [
-        f"{r.id}: verdict {r.got_verdict} (want {r.expected_verdict}), "
-        f"strength {r.got_strength} (want {r.expected_strength})"
-        for r in rows
-        # a machine without Lean cannot reach the top rung; only judge the rest
-        if not r.ok and not (not lean_ok and r.expected_strength.endswith("lean"))
-    ]
+    failures = []
+    for r in rows:
+        if r.got_verdict != r.expected_verdict:
+            failures.append(
+                f"{r.id}: verdict {r.got_verdict} (want {r.expected_verdict})")
+        elif r.got_strength != r.expected_strength and not (
+                not lean_ok and r.expected_strength.endswith("lean")):
+            failures.append(
+                f"{r.id}: strength {r.got_strength} (want {r.expected_strength})")
     assert not failures, "benchmark regressed:\n" + "\n".join(failures)
 
 

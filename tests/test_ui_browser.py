@@ -148,14 +148,25 @@ def test_the_progression_cell_appears_even_for_a_run_that_never_moved(tmp_path):
 @pytest.mark.skipif(_chrome() is None, reason="no headless Chromium available")
 def test_no_javascript_errors_on_the_page(served_run, tmp_path):
     """A thrown exception stops cell rendering silently, which looks like a
-    missing feature rather than a crash."""
+    missing feature rather than a crash.
+
+    "No errors" only means something once the app has actually run. A page that
+    never loaded throws nothing, so this test used to pass identically whether
+    app.js rendered the notebook or never executed at all: the DOM was captured
+    and discarded, and the only assertion was over a log file. Check the page
+    rendered FIRST, so a silent non-load fails here instead of reading as green.
+    """
     log = tmp_path / "chrome.log"
-    subprocess.run(
+    proc = subprocess.run(
         [_chrome(), "--headless", "--no-sandbox", "--disable-gpu", "--dump-dom",
          "--virtual-time-budget=9000", "--enable-logging", f"--log-file={log}",
          "--v=0", f"{served_run}/?run=agent-demo"],
         capture_output=True, text=True, timeout=120,
     )
+    dom = proc.stdout
+    assert "ERR_CONNECTION" not in dom, "the browser could not reach the server"
+    assert "In [1]" in dom and "look()" in dom, (
+        "app.js rendered no step cells, so a clean error log proves nothing")
     text = log.read_text(errors="replace") if log.is_file() else ""
     bad = [ln for ln in text.splitlines()
            if "Uncaught" in ln or "TypeError" in ln or "ReferenceError" in ln]

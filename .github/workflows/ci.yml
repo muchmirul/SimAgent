@@ -4,8 +4,10 @@
 # on its own:
 #
 #   python   Lean is genuinely OPTIONAL. This job has no toolchain at all, so
-#            it is the machine a new user actually has. Weaker verdicts are
-#            fine here; a crash or a wrong one is not.
+#            it is the machine a new user actually has. A weaker STRENGTH is
+#            fine here; a crash, or a wrong VERDICT, is not. Those are two
+#            different things, and excusing both at once let 8 of the 11
+#            known-answer claims run unchecked in this job.
 #   kernel   With Lean installed, the full suite plus `bench`, which is the
 #            known-answer test for the whole machine. Without Lean bench scores
 #            3/11 by design, so only this job can assert 11/11.
@@ -43,7 +45,18 @@ jobs:
         # nobody notices is how three UI bugs shipped green, so fail loudly
         # instead of quietly losing the only test that loads the real page.
         run: command -v google-chrome
-      - run: python -m pytest -q
+      - name: full suite, and only a missing Lean may cause a skip
+        # A skip nobody reads is how three UI bugs shipped green. Exactly one
+        # thing is legitimately absent in this job, so every skip must say so;
+        # a skip for any other reason is a test that quietly stopped running.
+        run: |
+          set -o pipefail
+          python -m pytest -q -rs | tee pytest.txt
+          if grep -E "^SKIPPED" pytest.txt | grep -qv "no Lean toolchain"; then
+            echo "::error::a test skipped for a reason other than the missing Lean toolchain"
+            grep -E "^SKIPPED" pytest.txt | grep -v "no Lean toolchain"
+            exit 1
+          fi
         env:
           SIMAGENT_LEAN: "off"
 
@@ -65,7 +78,18 @@ jobs:
       - name: the kernel job is pointless without a working Lean
         run: lean --version
       - run: command -v google-chrome
-      - run: python -m pytest -q
+      - name: full suite, and with a complete toolchain nothing may skip
+        # Lean and a browser are both installed above, so every test can run
+        # here. A skip is therefore lost coverage rather than an optional test,
+        # and losing the one test that loads the real page must not be silent.
+        run: |
+          set -o pipefail
+          python -m pytest -q -rs | tee pytest.txt
+          if grep -qE "^SKIPPED" pytest.txt; then
+            echo "::error::tests skipped in the full-toolchain job; that is lost coverage"
+            grep -E "^SKIPPED" pytest.txt
+            exit 1
+          fi
       - name: bench must stay 11/11
         # The bundled claims are known-answer tests: a drop here means the
         # machine changed its mind about a settled problem.

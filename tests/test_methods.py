@@ -61,6 +61,60 @@ def test_induction_refuses_a_multivariable_margin():
     assert any("exactly one variable" in n for n in notes)
 
 
+def _induction_claim(cid, space, margin, assume=()):
+    """A one-variable expr claim, so induction is the instrument under test."""
+    from simagent.core.claim import Claim
+
+    return Claim(
+        id=cid, title=cid, conjecture=cid, latex=cid, quantifier="forall",
+        spaces={"P": space}, recipe=[],
+        measure={"kind": "expr", "margin": margin},
+        certify={"kind": "expr", "margin": margin},
+        assume=list(assume), scene={"kind": "point", "of": "P"},
+    )
+
+
+def test_induction_refuses_a_domain_it_cannot_walk():
+    """Induction steps from one integer to the next, so a real interval has
+    points it never lands on. The margin here dips below zero at x = 0.5, which
+    no step visits, and the whole claim used to be stamped sandbox+lean anyway.
+    """
+    from simagent.core.space import Box
+
+    notes = []
+    claim = _induction_claim("real-domain", Box(shape=(1,), low=0.0, high=3.0),
+                             "4*P[0]**2 - 4*P[0] + 1/2")
+    assert induction_proof(claim, notes=notes) is None
+    assert any("integer domain" in n for n in notes)
+
+
+def test_induction_anchors_the_base_at_the_declared_start():
+    """The base case was pinned at n = 0 whatever the claim declared, so a
+    domain reaching below 0 was stamped from a case outside it. Here the margin
+    is n + 1, which is false at n = -10, the domain's own first point."""
+    from simagent.core.space import IntBox
+
+    notes = []
+    claim = _induction_claim("starts-below-zero",
+                             IntBox(shape=(1,), low=-10, high=10), "P[0] + 1")
+    assert induction_proof(claim, notes=notes) is None
+    assert any("P_0 = -10" in n for n in notes), notes
+
+
+def test_induction_does_not_borrow_the_claims_hypothesis():
+    """A hypothesis can be false at a point the chain still has to cross, so
+    using it as a step multiplier certifies a step the induction never earns.
+    This margin is false at n = 1 and n = 2, both inside the declared domain,
+    and the hypothesis n >= 1 used to certify the step regardless."""
+    from simagent.core.space import IntBox
+
+    notes = []
+    claim = _induction_claim("hypothesis-gap",
+                             IntBox(shape=(1,), low=1, high=10 ** 9),
+                             "P[0]**2 + 1 - 3*P[0]", assume=["P[0] - 1"])
+    assert induction_proof(claim, notes=notes) is None
+
+
 def test_induction_refuses_a_failing_base_case():
     import dataclasses
 

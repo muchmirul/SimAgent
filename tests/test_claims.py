@@ -80,20 +80,76 @@ def test_claim_json_roundtrip_and_untrusted_identity(tmp_path):
     assert validate_claim(loaded) == []
 
 
-def test_problem_loading_has_no_exec_or_legacy_module():
+_EXECUTABLE = {"exec", "eval", "compile"}
+
+
+def _executable_code_offenders(source: str) -> list[str]:
+    """Every way this source can reach a code-executing builtin, with lines."""
     import ast
+
+    hits = []
+    for node in ast.walk(ast.parse(source)):
+        line = getattr(node, "lineno", 0)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in _EXECUTABLE:
+                hits.append(f"{line} {node.func.id}()")
+            # getattr(builtins, "exec")(...) hides the name in a string
+            if node.func.id == "getattr" and len(node.args) > 1:
+                arg = node.args[1]
+                if isinstance(arg, ast.Constant) and arg.value in _EXECUTABLE:
+                    hits.append(f"{line} getattr(..., {arg.value!r})")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            dotted = f"{getattr(node.func.value, 'id', '?')}.{node.func.attr}"
+            # re.compile builds a regex, not a code object
+            if node.func.attr in _EXECUTABLE and dotted != "re.compile":
+                hits.append(f"{line} {dotted}()")
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name in _EXECUTABLE:
+                    hits.append(f"{line} imports {alias.name}")
+    return hits
+
+
+def test_problem_loading_has_no_exec_or_legacy_module():
+    """Loading a problem must never be able to execute code from that problem.
+
+    The guard used to match only a bare `exec(...)` / `eval(...)` call, so every
+    other spelling of the same function passed: `builtins.exec(...)` reaches it
+    through an attribute, `from builtins import exec as run` renames it,
+    `getattr(builtins, "exec")` spells it as a string, and `compile()` builds
+    the code object those take. A guard narrower than the invariant it
+    advertises is one a future change walks straight through while CI stays
+    green, which is exactly what this test exists to prevent.
+    """
     from pathlib import Path
 
     package = Path(__file__).resolve().parents[1] / "src" / "simagent"
     assert not (package / "spec.py").exists()
     offenders = []
     for path in package.rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in {"exec", "eval"}:
-                    offenders.append(f"{path.relative_to(package)}:{node.lineno}")
-    assert offenders == []
+        offenders += [f"{path.relative_to(package)}:{hit}"
+                      for hit in _executable_code_offenders(path.read_text())]
+    assert offenders == [], (
+        "an executable-code path exists in the package:\n" + "\n".join(offenders))
+
+
+def test_the_executable_code_guard_catches_every_spelling():
+    """The guard above is only worth its line count if it actually detects.
+
+    Each of these reaches the same builtin, and every one of them passed the
+    old bare-name check, so a future reintroduction would have landed green.
+    """
+    for source in (
+        "exec('x')",
+        "eval('x')",
+        "compile('x', 'f', 'exec')",
+        "import builtins\nbuiltins.exec('x')",
+        "from builtins import exec as run",
+        "import builtins\ngetattr(builtins, 'exec')('x')",
+    ):
+        assert _executable_code_offenders(source), f"guard missed: {source!r}"
+    # and it must not flag the regex compiler, which is not a code object
+    assert _executable_code_offenders("import re\nre.compile('x')") == []
 
 
 def test_legacy_executable_spec_is_refused(tmp_path):

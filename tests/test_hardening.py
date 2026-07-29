@@ -266,6 +266,36 @@ def test_lean_rejects_when_any_dependence_reported():
     assert r["axiom_clean"] is False
 
 
+def test_a_title_word_cannot_cost_a_generated_proof_its_stamp():
+    """The generated path carries the claim's title inside one block comment
+    whose delimiters leangen has neutralised, so the title cannot become code.
+    Scanning it raw made an ordinary English word a verdict: a claim titled
+    "System of circumcenter constraints" fell from sandbox+lean to sandbox.
+    """
+    src = ("/- System of circumcenter constraints (partial view) -/\n"
+           "theorem t : 1 + 1 = 2 := by decide\n#print axioms t\n")
+    assert "unsafe Lean construct" not in lean_check.check_source(src)["output"]
+
+
+@lean
+def test_generated_source_still_refuses_unsafe_code_outside_comments():
+    """Only comment text is exempt. Real constructs that can run code during
+    elaboration must still block the stamp."""
+    for bad in ("unsafe def f := 1\n", "syntax \"x\" : term\n", "#eval 1\n"):
+        src = bad + "theorem t : 1 + 1 = 2 := by decide\n#print axioms t\n"
+        out = lean_check.check_source(src, workdir="/tmp")["output"]
+        assert "unsafe Lean co" in out, (bad, out)
+
+
+@lean
+def test_untrusted_source_is_still_scanned_raw():
+    """Model-written source keeps the stricter rule: a mention inside a comment
+    is refused rather than trusted to a best-effort stripper."""
+    src = "/- IO -/\ntheorem t : 1 + 1 = 2 := by decide\n#print axioms t\n"
+    out = lean_check.check_untrusted_source(src, workdir="/tmp")["output"]
+    assert "unsafe Lean construct: IO" in out
+
+
 @lean
 def test_comment_injected_clean_phrase_does_not_fool_checker():
     # source echoes the magic phrase in a comment, but the real theorem is a hole

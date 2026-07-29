@@ -9,5 +9,9 @@ dist/
 runs/
 media/
 .DS_Store
+# CI tees its run logs to these so a later step can grep them; running the same
+# commands locally must not leave a file to commit by accident.
+bench.txt
+pytest.txt
 CLAUDE.md
 .claude/settings.local.json

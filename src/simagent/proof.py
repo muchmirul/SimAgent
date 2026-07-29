@@ -148,6 +148,27 @@ def _margin_polynomial(spec) -> tuple | None:
     return poly, sorted(used, key=lambda s: s.name), assumptions
 
 
+def _space_of_symbol(spec, sym):
+    """The declared Space a margin symbol ranges over, or None.
+
+    A symbol carries no domain of its own: `P_0` is just a name once the margin
+    has been turned into a polynomial. Induction needs the domain back, because
+    what it proves is a statement about the points the claim actually declares.
+    """
+    from .core import expr
+
+    def holds(node) -> bool:
+        if isinstance(node, list):
+            return any(holds(x) for x in node)
+        return node == sym
+
+    shapes = {n: tuple(s.shape) for n, s in spec.spaces.items()}
+    for name, node in expr.symbol_env(shapes).items():
+        if holds(node):
+            return spec.spaces[name]
+    return None
+
+
 def _attach_sos_lean(proof: Proof, spec: Claim, cert: dict, out_dir) -> None:
     """Generate + kernel-check the sum-of-squares certificate.
 
@@ -352,19 +373,36 @@ def induction_proof(
     if got is None:
         say("the margin is not a symbolic polynomial in the free variables")
         return None
-    poly, symbols, assumptions = got
+    # the claim's hypotheses are deliberately dropped here; see the step below
+    poly, symbols, _assumptions = got
     if len(symbols) != 1:
         say(f"induction here needs exactly one variable to induct on; the margin "
             f"uses {[s_.name for s_ in symbols]}")
         return None
     n = symbols[0]
-    base = sp.cancel(poly.subs({n: 0}))
+    # Induction walks the integers from one anchor upward, so it settles the
+    # claim only if the declared domain is those same integers. A real box has
+    # points between them and an integer box starting below the anchor has
+    # points before it; both were stamped proved on a region never visited.
+    space = _space_of_symbol(spec, n)
+    if space is None or not space.int_exact:
+        say(f"induction needs {n.name} to range over an integer domain, and it "
+            f"is declared over {type(space).__name__ if space else 'no known space'}; "
+            "stepping through the integers would leave the rest of that domain "
+            "unvisited")
+        return None
+    start = int(space.low)
+    base = sp.cancel(poly.subs({n: start}))
     if not base.is_rational or base <= 0:
-        say(f"the base case fails: the margin at {n.name} = 0 is {base}, "
+        say(f"the base case fails: the margin at {n.name} = {start} is {base}, "
             "which is not positive")
         return None
     step = sp.expand(poly.subs({n: n + 1}) - poly)
-    cert = sos.find_sos(step, [n], constraints=assumptions + [n], notes=notes)
+    # The chain passes through EVERY integer from `start` upward, so the step
+    # must hold at each one. The claim's own hypotheses are not available as
+    # multipliers here: a hypothesis can be false at a point the chain still
+    # has to cross, which would certify a step the induction never earns.
+    cert = sos.find_sos(step, [n], constraints=[n - start], notes=notes)
     if cert is None:
         say("the step case is not certifiable: the margin was not shown to be "
             f"non-decreasing in {n.name}")
@@ -375,11 +413,12 @@ def induction_proof(
         claim=spec.latex,
         verified_by="none",
         argument=(
-            f"Base case: the margin at {n.name} = 0 is {base} > 0. Step: the "
+            f"Base case: the margin at {n.name} = {start} is {base} > 0. Step: the "
             f"increase margin({n.name}+1) - margin({n.name}) is a sum of squares "
-            f"(using {n.name} >= 0), so the margin never decreases. By induction "
-            f"it is at least {base} > 0 for every {n.name} >= 0 — an UNBOUNDED "
-            "statement, which enumeration could never reach.\n\n"
+            f"(using {n.name} >= {start}), so the margin never decreases. By "
+            f"induction it is at least {base} > 0 for every integer "
+            f"{n.name} >= {start}, the whole declared domain and beyond — an "
+            "UNBOUNDED statement, which enumeration could never reach.\n\n"
             "    step increase: " + sos.identity_text(cert, margin_label="increase")
         ),
         statement_review="bundled-trusted" if spec_trusted else "spec-generated-review-needed",
@@ -389,8 +428,8 @@ def induction_proof(
         source = leangen.lean_sos(
             cert, theorem=theorem,
             title=(f"Induction step for: {spec.title} — the increase "
-                   f"margin(n+1) - margin(n) is a sum of squares for n >= 0 "
-                   f"(base case margin(0) = {base} > 0)"),
+                   f"margin(n+1) - margin(n) is a sum of squares for n >= {start} "
+                   f"(base case margin({start}) = {base} > 0)"),
         )
     except Exception as e:  # noqa: BLE001
         proof.lean_report = {"available": None, "ok": False,
